@@ -49,7 +49,6 @@ dnf install -y \
     python3-cryptography \
     python3-bcrypt \
     python3-pydantic \
-    python3-jose \
     gcc \
     nginx \
     nmap \
@@ -101,7 +100,8 @@ $PIP \
     "slowapi==0.1.9" \
     "pysnmp==6.1.4" \
     "apscheduler==3.10.4" \
-    "alembic==1.13.1"
+    "alembic==1.13.1" \
+    "python-jose==3.3.0"
 
 # Verify uvicorn is reachable
 sudo -u "${APP_USER}" /home/nettrack/.local/bin/uvicorn --version \
