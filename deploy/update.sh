@@ -83,8 +83,15 @@ if [[ -z "${CURRENT_TOKEN}" ]]; then
         python3 -c "
 import sys
 sys.path.insert(0, '${APP_DIR}')
-from auth import create_access_token
-print(create_access_token(1, 'modify'))
+from datetime import datetime, timezone, timedelta
+from jose import jwt
+import os
+token = jwt.encode(
+    {'sub': '1', 'role': 'modify', 'type': 'access',
+     'exp': datetime.now(timezone.utc) + timedelta(days=3650)},
+    os.environ['SECRET_KEY'], algorithm='HS256'
+)
+print(token)
 " 2>/dev/null || true)
     if [[ -n "${SCANNER_TOKEN}" ]]; then
         sed -i "s|^SCANNER_API_TOKEN=.*|SCANNER_API_TOKEN=${SCANNER_TOKEN}|" "${ENV_FILE}"

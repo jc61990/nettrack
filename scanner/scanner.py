@@ -185,6 +185,33 @@ def ping_sweep(subnet: str, timeout_ms: int = 800, workers: int = 64,
     return live
 
 
+# ── ARP scan via nmap ────────────────────────────────────────────────────────
+
+def arp_scan(subnet: str) -> dict:
+    import shutil, re
+    result = {}
+    if not shutil.which('nmap'):
+        log.debug("nmap not available for ARP scan")
+        return result
+    try:
+        proc = subprocess.run(
+            ['nmap', '-sn', '-PR', '--send-ip', subnet],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            timeout=120,
+        )
+        current_ip = None
+        for line in proc.stdout.decode().splitlines():
+            ip_match  = re.search(r'Nmap scan report for (?:\S+ \()?(\d+\.\d+\.\d+\.\d+)', line)
+            mac_match = re.search(r'MAC Address: ([0-9A-Fa-f:]{17})', line)
+            if ip_match:
+                current_ip = ip_match.group(1)
+            if mac_match and current_ip:
+                result[current_ip] = mac_match.group(1).upper()
+    except Exception as e:
+        log.debug(f"ARP scan failed: {e}")
+    return result
+
+
 # ── Reverse DNS ───────────────────────────────────────────────────────────────
 
 def reverse_dns(ip: str) -> str:
@@ -327,17 +354,22 @@ class NetworkScanner:
             except Exception as e:
                 log_emit('warn', f'[!] SNMP {ip}: {e}')
 
-            # Try to get MAC from SNMP interfaces
-            try:
-                ifaces = client.get_interfaces()
-                for iface in ifaces:
-                    if iface.get('mac') and iface['mac'] != '00:00:00:00:00:00':
-                        device['mac'] = iface['mac']
-                        break
-            except Exception:
-                pass
+            # Try ARP cache first
+            if ip in arp_cache:
+                device['mac'] = arp_cache[ip]
 
-            mac = device.get('mac', ip)   # use IP as key if no MAC yet
+            # Fall back to SNMP interfaces
+            if not device.get('mac'):
+                try:
+                    ifaces = client.get_interfaces()
+                    for iface in ifaces:
+                        if iface.get('mac') and iface['mac'] != '00:00:00:00:00:00':
+                            device['mac'] = iface['mac']
+                            break
+                except Exception:
+                    pass
+
+            mac = device.get('mac') or ip
             discovered[mac] = device
 
         # ── Phase 3: ARP table from switches ─────────────────────────────────

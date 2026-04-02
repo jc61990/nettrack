@@ -174,16 +174,21 @@ def ingest(
     }
 
     for item in payload.devices:
-        if not item.mac:
+        # Allow devices without MAC — use IP as dedup key
+        dedup_key = item.mac or item.ip
+        if not dedup_key:
             continue
-        if item.mac in blocked:
+        if item.mac and item.mac in blocked:
             counts['blocked'] += 1
             continue
 
         incoming = item.model_dump()
-        existing = db.query(models.Device).filter(
-            models.Device.mac == item.mac
-        ).first()
+        # Look up existing device by MAC if available, otherwise by IP
+        existing = None
+        if item.mac:
+            existing = db.query(models.Device).filter(models.Device.mac == item.mac).first()
+        if not existing and item.ip:
+            existing = db.query(models.Device).filter(models.Device.ip == item.ip).first()
 
         if not existing:
             state = 'new'
@@ -199,11 +204,15 @@ def ingest(
                 diff  = None
             existing_id = existing.id
 
-        # Remove old pending entry for same MAC (replace with fresh scan data)
-        db.query(models.DiscoveryQueue).filter(
-            models.DiscoveryQueue.mac == item.mac,
+        # Remove old pending entry for same device (replace with fresh scan data)
+        q = db.query(models.DiscoveryQueue).filter(
             models.DiscoveryQueue.queue_status == 'pending',
-        ).delete()
+        )
+        if item.mac:
+            q = q.filter(models.DiscoveryQueue.mac == item.mac)
+        elif item.ip:
+            q = q.filter(models.DiscoveryQueue.ip == item.ip)
+        q.delete()
 
         entry = models.DiscoveryQueue(
             **incoming,
