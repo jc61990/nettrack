@@ -16,6 +16,7 @@ from routers import scanner as scanner_router
 from routers import schedule as schedule_router
 from routers import floors as floors_router
 from routers import queue as queue_router
+from routers import import_router
 from routers import vlans as vlans_router
 from scanner.scheduler import start_scheduler, stop_scheduler
 
@@ -109,6 +110,7 @@ def device_statuses(
         for r in rows
     ]
 app.include_router(queue_router.router)
+app.include_router(import_router.router)
 app.include_router(vlans_router.router)
 
 

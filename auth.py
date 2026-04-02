@@ -23,7 +23,7 @@ def _require_env(key: str) -> str:
 
 SECRET_KEY    = _require_env("SECRET_KEY")
 ALGORITHM     = "HS256"
-ACCESS_EXPIRE = int(os.environ.get("ACCESS_TOKEN_EXPIRE_MINUTES", 30))
+ACCESS_EXPIRE = int(os.environ.get("ACCESS_TOKEN_EXPIRE_MINUTES", 480))
 REFRESH_EXPIRE = int(os.environ.get("REFRESH_TOKEN_EXPIRE_DAYS", 7))
 
 pwd_context   = CryptContext(schemes=["bcrypt"], deprecated="auto")
