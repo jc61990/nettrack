@@ -70,6 +70,11 @@ systemctl is-active --quiet nettrack \
     && info "NetTrack restarted successfully ✓" \
     || error "Service failed to restart — check: journalctl -u nettrack -n 50"
 
+# ── Fix frontend permissions for nginx ───────────────────────────────────────
+info "Setting frontend permissions..."
+chmod o+rx "${APP_DIR}" "${APP_DIR}/frontend"
+find "${APP_DIR}/frontend" -type f -exec chmod o+r {} \;
+
 # ── Done ──────────────────────────────────────────────────────────────────────
 echo ""
 echo -e "${GREEN}Update complete.${NC}"

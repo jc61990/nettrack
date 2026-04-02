@@ -151,6 +151,9 @@ chown -R root:${APP_GROUP} "${APP_DIR}"
 chmod -R 750 "${APP_DIR}"
 chown -R ${APP_USER}:${APP_GROUP} "${LOG_DIR}"
 chmod 770 "${LOG_DIR}"
+# Frontend must be readable by nginx (runs as nginx user, not nettrack)
+chmod o+rx "${APP_DIR}" "${APP_DIR}/frontend"
+find "${APP_DIR}/frontend" -type f -exec chmod o+r {} \;
 
 # ── 8. Ping capability ────────────────────────────────────────────────────────
 info "Checking ping capability..."
