@@ -119,23 +119,28 @@ def _compute_diff(existing: models.Device, incoming: dict) -> dict:
 def _apply_to_inventory(item: models.DiscoveryQueue, db: Session,
                          user_id: int) -> models.Device:
     """Write a queue item into the devices table."""
-    if item.existing_id:
-        device = db.query(models.Device).filter(models.Device.id == item.existing_id).first()
-        if device:
-            for f in DEVICE_FIELDS:
-                val = getattr(item, f)
-                if val is not None:
-                    setattr(device, f, val)
-            db.commit()
-            db.refresh(device)
-            return device
+    try:
+        if item.existing_id:
+            device = db.query(models.Device).filter(models.Device.id == item.existing_id).first()
+            if device:
+                for f in DEVICE_FIELDS:
+                    val = getattr(item, f)
+                    if val is not None:
+                        setattr(device, f, val)
+                db.commit()
+                db.refresh(device)
+                return device
 
-    # New device
-    device = models.Device(**{f: getattr(item, f) for f in DEVICE_FIELDS})
-    db.add(device)
-    db.commit()
-    db.refresh(device)
-    return device
+        # New device — only set non-None fields
+        fields = {f: getattr(item, f) for f in DEVICE_FIELDS if getattr(item, f) is not None}
+        device = models.Device(**fields)
+        db.add(device)
+        db.commit()
+        db.refresh(device)
+        return device
+    except Exception as e:
+        db.rollback()
+        raise
 
 
 def _filter_query(q, payload: BulkActionRequest):

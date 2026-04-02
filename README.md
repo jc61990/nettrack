@@ -1,272 +1,248 @@
-# NetTrack — Backend API
+# NetTrack
 
-FastAPI + PostgreSQL backend for the NetTrack network device inventory,
-with JWT auth, role-based access control, SSO (OIDC), and audit logging.
+A lightweight network device inventory system for managing physical security and IT devices — cameras, intercoms, access control panels, switches, WAPs, servers, and printers — by floor, switch, and port.
+
+Built as a self-hosted alternative to NetBox for teams that want something simpler and purpose-built for physical security infrastructure.
+
+---
+
+## Features
+
+- **Device inventory** — hostname, IP, MAC, type, status, floor, location, switch, port, VLAN, notes
+- **Network scanner** — discovers devices via ping sweep, ARP, SNMP, LLDP, and MAC OUI lookup
+- **Discovery queue** — all scan results go into a review queue before entering inventory. Accept, edit, ignore, or block devices before they're added
+- **Floors management** — define floors per building, used as dropdowns across the app
+- **VLAN management** — define VLANs with ID, name, and description
+- **Switches tab** — manage switches separately from device inventory; view all devices per port per switch
+- **Scheduled scanning** — configure auto-scan on a cron schedule from the UI
+- **Email alerts** — get notified on new device discovery, devices going offline, or scan completion
+- **Audit log** — every create, update, delete, and login is logged with user and timestamp
+- **Export** — CSV and PDF export for device inventory (full, filtered, per-switch) and audit log
+- **Dark mode** — follows system preference, with manual toggle
+- **Role-based access** — read_only, modify, admin
+
+---
+
+## Stack
+
+| Component | Technology |
+|---|---|
+| OS | Fedora 43 |
+| Backend | FastAPI + Python 3.14 |
+| Database | PostgreSQL 18 |
+| Web server | nginx 1.28 |
+| Frontend | Single-file HTML/JS (no framework) |
+| Auth | JWT (HttpOnly cookies + in-memory Bearer token) |
+| Process manager | systemd + uvicorn |
 
 ---
 
 ## Requirements
 
-- Python 3.11+
-- PostgreSQL 14+
+**Minimum:** 2 CPU cores, 2 GB RAM, 20 GB disk
+**Recommended:** 4 cores, 4 GB RAM, 40 GB disk
+
+The server must have network access to the subnets you want to scan. For ARP-based MAC discovery, the server must be on the same Layer 2 network as the devices.
 
 ---
 
-## 1. PostgreSQL setup
+## Installation
 
-```sql
-CREATE USER nettrack WITH PASSWORD 'changeme';
-CREATE DATABASE nettrack OWNER nettrack;
-```
-
----
-
-## 2. Install dependencies
+### 1. Clone the repo
 
 ```bash
-cd nettrack/
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+git clone https://github.com/yourorg/nettrack.git /opt/nettrack-src
+cd /opt/nettrack-src
 ```
 
----
+### 2. Install your TLS certificate
 
-## 3. Configure environment
+```bash
+cp your-cert.crt  /etc/pki/tls/certs/nettrack.crt
+cp your-cert.key  /etc/pki/tls/private/nettrack.key
+chmod 644 /etc/pki/tls/certs/nettrack.crt
+chmod 600 /etc/pki/tls/private/nettrack.key
+```
 
-Create a `.env` file:
+Or generate a self-signed cert for internal use:
+
+```bash
+openssl req -x509 -nodes -days 3650 -newkey rsa:4096 \
+  -keyout /etc/pki/tls/private/nettrack.key \
+  -out    /etc/pki/tls/certs/nettrack.crt \
+  -subj   "/CN=nettrack.yourdomain.local"
+```
+
+### 3. Set your hostname in nginx config
+
+```bash
+sed -i 's/nettrack.yourcompany.com/nettrack.yourdomain.local/g' deploy/nginx.conf
+```
+
+### 4. Run the setup script
+
+```bash
+bash deploy/setup_fedora43.sh
+```
+
+The script installs all dependencies, sets up PostgreSQL, runs migrations, creates an admin account, configures nginx and systemd, and prints the generated admin credentials at the end.
+
+### 5. Update the environment file
+
+```bash
+nano /etc/nettrack/nettrack.env
+```
+
+Set your hostname:
 
 ```env
-# Database
-DATABASE_URL=postgresql://nettrack:changeme@localhost:5432/nettrack
-
-# JWT — generate with: openssl rand -hex 32
-SECRET_KEY=your-secret-key-here
-ACCESS_TOKEN_EXPIRE_MINUTES=30
-REFRESH_TOKEN_EXPIRE_DAYS=7
-
-# SSO / OIDC (optional — remove if not using SSO)
-OIDC_CLIENT_ID=your-client-id
-OIDC_CLIENT_SECRET=your-client-secret
-OIDC_DISCOVERY_URL=https://login.microsoftonline.com/{tenant}/v2.0
-OIDC_REDIRECT_URI=https://nettrack.yourcompany.com/api/auth/callback
-OIDC_DEFAULT_ROLE=read_only
-FRONTEND_URL=https://nettrack.yourcompany.com
+ALLOWED_ORIGINS=https://nettrack.yourdomain.local
+ALLOWED_HOSTS=nettrack.yourdomain.local,localhost,127.0.0.1
 ```
 
-**OIDC discovery URLs by provider:**
-| Provider | URL |
-|----------|-----|
-| Azure AD | `https://login.microsoftonline.com/{tenant-id}/v2.0` |
-| Okta | `https://{your-domain}.okta.com/oauth2/default` |
-| Google Workspace | `https://accounts.google.com` |
+### 6. Add DNS record
+
+Point your internal DNS to the server IP:
+
+```
+nettrack.yourdomain.local  ->  <server IP>
+```
+
+### 7. Log in
+
+Open `https://nettrack.yourdomain.local` in your browser, accept the certificate warning, and log in with the credentials printed by the setup script.
 
 ---
 
-## 4. Create the first admin user
+## First steps after login
 
-Run this once after the DB is set up:
+1. **Change your admin password** — Users -> Edit -> set a new password
+2. **Add floors** — Floors -> Add floor (these populate dropdowns across the app)
+3. **Add VLANs** — VLANs -> Add VLAN
+4. **Configure subnets** — Network scan -> enter your subnets -> Save config
+5. **Run a scan** — Network scan -> Start scan
+6. **Review results** — Discovery queue -> review each device, edit if needed, then Accept or Ignore
+
+---
+
+## Updating
 
 ```bash
-python << 'PYEOF'
-from database import SessionLocal
-import models, auth
-models.Base.metadata.create_all(bind=auth.engine if hasattr(auth, "engine") else __import__("database").engine)
-db = SessionLocal()
-admin = models.User(
-    email="admin@yourcompany.com",
-    full_name="Admin",
-    role="admin",
-    auth_provider="local",
-    is_active=True,
-    password_hash=auth.hash_password("changeme"),
-)
-db.add(admin)
-db.commit()
-print("Admin user created")
-PYEOF
+bash /opt/nettrack-src/deploy/update.sh
 ```
+
+The update script:
+- Pulls latest code from git
+- Runs pre-flight sanity checks (verifies key files are correct before touching anything)
+- Backs up the current app to /opt/nettrack-backups/
+- Installs any new Python dependencies
+- Validates nginx config
+- Runs database migrations
+- Restarts the service (auto-restores backup if startup fails)
+- Tests the API health endpoint
+- Fixes nginx file permissions
 
 ---
 
-## 5. Run
+## File locations
 
-**Development:**
-```bash
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
-```
-
-**Production (systemd):**
-
-```ini
-# /etc/systemd/system/nettrack.service
-[Unit]
-Description=NetTrack API
-After=network.target postgresql.service
-
-[Service]
-User=www-data
-WorkingDirectory=/opt/nettrack
-EnvironmentFile=/opt/nettrack/.env
-ExecStart=/opt/nettrack/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target
-```
+| Path | What it is |
+|---|---|
+| `/opt/nettrack/` | Deployed application code |
+| `/opt/nettrack-src/` | Git repository |
+| `/opt/nettrack-backups/` | Auto-backups (last 5 kept) |
+| `/etc/nettrack/nettrack.env` | All secrets and environment variables |
+| `/var/log/nettrack/` | Application logs |
+| `/var/log/nettrack/scans/` | Raw scan result JSON files |
+| `/etc/nginx/conf.d/nettrack.conf` | nginx config |
+| `/etc/systemd/system/nettrack.service` | systemd unit |
 
 ---
 
-## 6. Nginx reverse proxy
+## Environment variables
 
-```nginx
-server {
-    listen 80;
-    server_name nettrack.yourcompany.internal;
-
-    location /api/ {
-        proxy_pass       http://127.0.0.1:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-
-    location / {
-        root /opt/nettrack/frontend;
-        try_files $uri $uri/ /index.html;
-    }
-}
-```
+| Variable | Description |
+|---|---|
+| `DATABASE_URL` | PostgreSQL connection string |
+| `SECRET_KEY` | JWT signing key (auto-generated at install) |
+| `ALLOWED_ORIGINS` | CORS allowed origins (your hostname) |
+| `ALLOWED_HOSTS` | Trusted hosts |
+| `SCANNER_API_TOKEN` | Long-lived JWT for the scanner to post results (auto-generated) |
+| `SNMP_COMMUNITY` | SNMPv2c community string |
+| `SNMP_V3_USERNAME` | SNMPv3 username (optional) |
+| `SNMP_V3_AUTH_KEY` | SNMPv3 auth passphrase (optional) |
+| `SNMP_V3_PRIV_KEY` | SNMPv3 priv passphrase (optional) |
 
 ---
 
-## Role permissions
+## How scanning works
 
-| Action | read_only | modify | admin |
-|--------|-----------|--------|-------|
-| View devices / switches | ✓ | ✓ | ✓ |
-| Create / edit devices | — | ✓ | ✓ |
-| Delete devices | — | — | ✓ |
-| Manage users | — | — | ✓ |
-| View audit log | — | — | ✓ |
+1. **Ping sweep** — ICMP to all hosts in each configured subnet, finds live IPs
+2. **ARP scan** — nmap ARP ping to get MAC addresses from Layer 2 (no SNMP required)
+3. **SNMP** — queries each live host for system description, hostname, and interface MACs
+4. **LLDP** — walks LLDP MIB on switches to discover neighbors and port mappings
+5. **MAC bridge table** — pulls the switch MAC address table to map devices to ports
+6. **OUI lookup** — identifies vendor from MAC address prefix
 
----
-
-## API endpoints
-
-### Auth
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/auth/login` | Local login → returns JWT pair |
-| POST | `/api/auth/refresh` | Refresh access token |
-| POST | `/api/auth/logout` | Revoke refresh token |
-| GET | `/api/auth/sso/login` | Redirect to OIDC provider |
-| GET | `/api/auth/callback` | OIDC callback handler |
-
-### Users (admin only)
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/users` | List all users |
-| GET | `/api/users/me` | Current user profile |
-| POST | `/api/users` | Create user |
-| PUT | `/api/users/{id}` | Update user / role / password |
-| DELETE | `/api/users/{id}` | Delete user |
-
-### Devices
-| Method | Path | Role required |
-|--------|------|---------------|
-| GET | `/api/devices` | read_only |
-| POST | `/api/devices` | modify |
-| PUT | `/api/devices/{id}` | modify |
-| DELETE | `/api/devices/{id}` | admin |
-| POST | `/api/devices/bulk-upsert` | modify |
-
-### Audit log (admin only)
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/audit` | Query audit log (`?resource=`, `?user_id=`, `?action=`) |
+All results go to the discovery queue. Nothing is added to inventory automatically. Review each device, edit details if needed, then accept or ignore.
 
 ---
 
-## Wiring the frontend
+## Roles
 
-**Login:**
-```js
-const res = await fetch('/api/auth/login', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-  body: new URLSearchParams({ username: email, password }),
-});
-const { access_token, refresh_token } = await res.json();
-localStorage.setItem('access_token', access_token);
-```
-
-**Authenticated requests:**
-```js
-const res = await fetch('/api/devices', {
-  headers: { Authorization: `Bearer ${localStorage.getItem('access_token')}` },
-});
-```
-
-**SSO login button:**
-```js
-window.location.href = '/api/auth/sso/login';
-```
-
+| Role | Permissions |
+|---|---|
+| `read_only` | View devices, inventory, audit log, export |
+| `modify` | All of the above + add/edit devices, run scans, manage queue, manage floors/VLANs/switches |
+| `admin` | All of the above + manage users |
 
 ---
 
-## Database migrations (Alembic)
+## Database migrations
 
-NetTrack uses Alembic for all schema changes. Never edit the database by hand.
-
-### First-time setup
-
-After creating your PostgreSQL database and setting `DATABASE_URL`, apply the
-baseline migration to create all tables:
+Migrations run automatically during update.sh. To run manually:
 
 ```bash
-alembic upgrade head
+source /etc/nettrack/nettrack.env
+export PATH="/home/nettrack/.local/bin:$PATH"
+cd /opt/nettrack
+sudo -u nettrack --preserve-env=DATABASE_URL,SECRET_KEY,PATH \
+    alembic upgrade head
 ```
 
-That's it — no need to run the old `create_all` bootstrap script.
+---
 
-### Everyday workflow
+## Troubleshooting
 
-| Task | Command |
-|------|---------|
-| Apply all pending migrations | `alembic upgrade head` |
-| Roll back the last migration | `alembic downgrade -1` |
-| Roll back to a specific revision | `alembic downgrade 0001` |
-| Show current revision | `alembic current` |
-| Show migration history | `alembic history --verbose` |
-
-### Adding a new migration (e.g. adding a column)
-
-1. Edit your SQLAlchemy model in `models.py`
-2. Auto-generate the migration:
-   ```bash
-   alembic revision --autogenerate -m "add serial_number to devices"
-   ```
-3. Review the generated file in `alembic/versions/` — always check it before applying
-4. Apply it:
-   ```bash
-   alembic upgrade head
-   ```
-
-### Generating SQL without applying (for review or staging)
-
+**500 on the login page**
 ```bash
-alembic upgrade head --sql > pending_migration.sql
+tail -20 /var/log/nginx/error.log
+# Usually a permissions issue:
+chmod o+rx /opt/nettrack /opt/nettrack/frontend
+find /opt/nettrack/frontend -type f -exec chmod o+r {} \;
+usermod -aG nettrack nginx && systemctl restart nginx
 ```
 
-### Stamping an existing database
-
-If you already have tables created by the old `create_all()` and want to bring
-them under Alembic management without re-creating them:
-
+**Login succeeds but shows blank / loops**
 ```bash
-alembic stamp 0001
+systemctl status nettrack
+curl -sk https://localhost/api/health
 ```
 
-This marks the database as being at revision `0001` without running any SQL.
-From that point forward, use `alembic upgrade head` for all changes.
+**Scan finds hosts but nothing appears in queue**
+```bash
+source /etc/nettrack/nettrack.env
+curl -sk https://localhost/api/queue/counts \
+  -H "Authorization: Bearer $SCANNER_API_TOKEN"
+# If you get "Invalid or expired token", run:
+bash /opt/nettrack-src/deploy/update.sh
+```
+
+**Devices have no MAC address after scan**
+The ARP scan requires the NetTrack server to be on the same Layer 2 network as the devices being scanned. If routing through a different subnet, ARP will not return MACs. Devices without MACs are still added to the queue using IP as the dedup key.
+
+---
+
+## License
+
+MIT
