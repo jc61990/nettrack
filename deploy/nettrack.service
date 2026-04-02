@@ -1,0 +1,74 @@
+[Unit]
+Description=NetTrack API
+Documentation=https://github.com/yourorg/nettrack
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+# ── Identity ──────────────────────────────────────────────────────────────────
+User=nettrack
+Group=nettrack
+
+# ── Working directory and environment ────────────────────────────────────────
+WorkingDirectory=/opt/nettrack
+EnvironmentFile=/etc/nettrack/nettrack.env
+
+# ── Process ───────────────────────────────────────────────────────────────────
+ExecStart=/opt/nettrack/venv/bin/uvicorn main:app \
+    --host 127.0.0.1 \
+    --port 8000 \
+    --workers 2 \
+    --log-level info \
+    --access-log \
+    --no-use-colors
+
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+KillMode=mixed
+
+# ── Hardening ─────────────────────────────────────────────────────────────────
+# Prevent privilege escalation
+NoNewPrivileges=true
+
+# Private /tmp — scanner results go to /var/log/nettrack, not /tmp
+PrivateTmp=true
+
+# Read-only filesystem except where explicitly allowed
+ProtectSystem=strict
+ReadWritePaths=/var/log/nettrack /opt/nettrack
+
+# Hide /home, /root from the service
+ProtectHome=true
+
+# Prevent loading kernel modules
+ProtectKernelModules=true
+
+# Prevent writing to kernel variables
+ProtectKernelTunables=true
+
+# Restrict system calls to those needed by a Python web process
+SystemCallFilter=@system-service @network-io
+SystemCallErrorNumber=EPERM
+
+# Restrict address families — only IPv4/IPv6 and Unix sockets needed
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+# No raw sockets (scanner uses subprocess ping, not raw sockets)
+RestrictNamespaces=true
+
+# Prevent the service from gaining new capabilities
+CapabilityBoundingSet=
+
+# Memory protections
+MemoryDenyWriteExecute=true
+LockPersonality=true
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nettrack
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,34 @@
+# NetTrack scanner configuration — topology and tuning only.
+#
+# SECRETS DO NOT BELONG HERE. Set these environment variables instead:
+#
+#   SNMP_COMMUNITY          SNMPv2c community string
+#   SNMP_V3_USERNAME        SNMPv3 username
+#   SNMP_V3_AUTH_KEY        SNMPv3 auth passphrase
+#   SNMP_V3_PRIV_KEY        SNMPv3 priv passphrase
+#   SNMP_V3_AUTH_PROTOCOL   sha (default) | sha256 | md5
+#   SNMP_V3_PRIV_PROTOCOL   aes (default) | aes192 | des
+#   SCANNER_API_TOKEN       Bearer token for the NetTrack API
+
+# ── Subnets ───────────────────────────────────────────────────────────────────
+subnets:
+  - cidr: 10.0.1.0/24
+    description: "Floor 1"
+
+  - cidr: 10.0.2.0/24
+    description: "Floor 2"
+
+# ── Tuning ────────────────────────────────────────────────────────────────────
+ping_timeout_ms: 800
+ping_workers:    64
+snmp_port:       161
+snmp_timeout:    2
+snmp_retries:    1
+
+# ── Output ────────────────────────────────────────────────────────────────────
+results_dir: /var/log/nettrack/scans
+api_url:     http://localhost:8000
+
+# ── Schedule ──────────────────────────────────────────────────────────────────
+schedule_enabled: false
+schedule_cron: "0 */4 * * *"

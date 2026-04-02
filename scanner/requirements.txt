@@ -1,0 +1,12 @@
+# Add these to your main requirements.txt
+# or install separately in the scanner venv
+
+pysnmp==6.1.4
+pysnmp-lextudio==0.1.0   # maintained fork — use instead of pysnmp if on Python 3.12+
+apscheduler==3.10.4
+pyyaml==6.0.1
+requests==2.31.0
+httpx==0.27.0
+
+# Optional but recommended — full offline OUI/vendor database
+# manuf==1.1.5

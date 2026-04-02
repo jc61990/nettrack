@@ -1,0 +1,1459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>NetTrack</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #f7f7f6; --surface: #ffffff; --surface2: #f1f0ec;
+    --border: rgba(0,0,0,0.1); --border2: rgba(0,0,0,0.2);
+    --text: #1a1a18; --text2: #6b6b67; --text3: #9b9b97;
+    --accent: #1a1a18; --radius: 8px; --radius-lg: 12px;
+    --green: #3B6D11; --green-bg: #EAF3DE;
+    --red: #A32D2D; --red-bg: #FCEBEB;
+    --amber: #854F0B; --amber-bg: #FAEEDA;
+    --blue: #185FA5; --blue-bg: #E6F1FB;
+  }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); font-size: 14px; min-height: 100vh; }
+
+  /* ── Layout ── */
+  #login-screen { display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 1rem; }
+  #app { display: none; min-height: 100vh; }
+  .sidebar { position: fixed; top: 0; left: 0; width: 220px; height: 100vh; background: var(--surface); border-right: 0.5px solid var(--border); display: flex; flex-direction: column; z-index: 100; }
+  .main { margin-left: 220px; padding: 2rem; min-height: 100vh; }
+  @media (max-width: 768px) { .sidebar { width: 100%; height: auto; position: static; } .main { margin-left: 0; } }
+
+  /* ── Sidebar ── */
+  .sidebar-logo { padding: 1.25rem 1.25rem 1rem; border-bottom: 0.5px solid var(--border); }
+  .sidebar-logo-title { font-size: 16px; font-weight: 600; color: var(--text); }
+  .sidebar-logo-sub { font-size: 11px; color: var(--text3); margin-top: 2px; }
+  .sidebar-nav { flex: 1; padding: 0.75rem 0; overflow-y: auto; }
+  .nav-section { font-size: 10px; font-weight: 600; color: var(--text3); letter-spacing: 0.08em; text-transform: uppercase; padding: 0.75rem 1.25rem 0.25rem; }
+  .nav-item { display: flex; align-items: center; gap: 10px; padding: 8px 1.25rem; font-size: 13px; color: var(--text2); cursor: pointer; border-radius: 0; transition: all 0.1s; border: none; background: none; width: 100%; text-align: left; }
+  .nav-item:hover { background: var(--surface2); color: var(--text); }
+  .nav-item.active { background: var(--surface2); color: var(--text); font-weight: 500; }
+  .nav-item svg { width: 15px; height: 15px; flex-shrink: 0; opacity: 0.6; }
+  .nav-item.active svg { opacity: 1; }
+  .sidebar-user { padding: 1rem 1.25rem; border-top: 0.5px solid var(--border); }
+  .sidebar-user-name { font-size: 13px; font-weight: 500; color: var(--text); }
+  .sidebar-user-role { font-size: 11px; color: var(--text3); margin-top: 1px; text-transform: capitalize; }
+  .sidebar-user-email { font-size: 11px; color: var(--text3); margin-top: 1px; }
+
+  /* ── Login ── */
+  .login-card { background: var(--surface); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 2rem; width: 100%; max-width: 380px; }
+  .login-title { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
+  .login-sub { font-size: 13px; color: var(--text2); margin-bottom: 1.5rem; }
+  .login-divider { display: flex; align-items: center; gap: 10px; margin: 1rem 0; }
+  .login-divider::before, .login-divider::after { content: ''; flex: 1; height: 0.5px; background: var(--border); }
+  .login-divider span { font-size: 12px; color: var(--text3); }
+  .login-error { background: var(--red-bg); color: var(--red); font-size: 13px; padding: 8px 12px; border-radius: var(--radius); margin-bottom: 1rem; display: none; }
+
+  /* ── Forms ── */
+  .field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; }
+  .field label { font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.05em; }
+  .field input, .field select, .field textarea {
+    font-size: 13px; padding: 8px 10px; border: 0.5px solid var(--border2);
+    border-radius: var(--radius); background: var(--surface); color: var(--text);
+    font-family: inherit; transition: border-color 0.15s;
+  }
+  .field input:focus, .field select:focus, .field textarea:focus { outline: none; border-color: var(--accent); }
+  .field textarea { resize: vertical; min-height: 60px; }
+
+  /* ── Buttons ── */
+  .btn { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; padding: 7px 14px; border: 0.5px solid var(--border2); border-radius: var(--radius); background: var(--surface); color: var(--text); cursor: pointer; font-family: inherit; transition: all 0.1s; white-space: nowrap; }
+  .btn:hover { background: var(--surface2); }
+  .btn:active { transform: scale(0.98); }
+  .btn.primary { background: var(--accent); color: #fff; border-color: transparent; }
+  .btn.primary:hover { opacity: 0.88; }
+  .btn.danger { color: var(--red); border-color: var(--red); }
+  .btn.danger:hover { background: var(--red-bg); }
+  .btn.full { width: 100%; justify-content: center; }
+  .btn.sso { background: var(--blue-bg); color: var(--blue); border-color: transparent; }
+  .btn.sso:hover { opacity: 0.88; }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-sm { padding: 4px 10px; font-size: 12px; }
+
+  /* ── Page header ── */
+  .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 10px; }
+  .page-title { font-size: 18px; font-weight: 600; }
+  .page-sub { font-size: 13px; color: var(--text2); margin-top: 2px; }
+
+  /* ── Metrics ── */
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 1.5rem; }
+  .metric { background: var(--surface2); border-radius: var(--radius); padding: 12px 14px; }
+  .metric-label { font-size: 11px; color: var(--text2); margin-bottom: 4px; font-weight: 500; }
+  .metric-value { font-size: 24px; font-weight: 600; }
+  .metric-value.green { color: var(--green); }
+  .metric-value.red { color: var(--red); }
+  .metric-value.amber { color: var(--amber); }
+
+  /* ── Toolbar ── */
+  .toolbar { display: flex; gap: 8px; margin-bottom: 1rem; flex-wrap: wrap; align-items: center; }
+  .toolbar input, .toolbar select { font-size: 13px; padding: 7px 10px; border: 0.5px solid var(--border2); border-radius: var(--radius); background: var(--surface); color: var(--text); }
+  .toolbar input { min-width: 200px; }
+
+  /* ── Table ── */
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { font-size: 11px; font-weight: 600; color: var(--text2); text-align: left; padding: 8px 12px; border-bottom: 0.5px solid var(--border); text-transform: uppercase; letter-spacing: 0.04em; cursor: pointer; user-select: none; white-space: nowrap; }
+  th:hover { color: var(--text); }
+  td { padding: 9px 12px; border-bottom: 0.5px solid var(--border); vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: var(--surface2); }
+  .mono { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 12px; color: var(--text2); }
+
+  /* ── Badges ── */
+  .badge { display: inline-flex; align-items: center; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 20px; white-space: nowrap; }
+  .badge-online  { background: var(--green-bg); color: var(--green); }
+  .badge-offline { background: var(--red-bg); color: var(--red); }
+  .badge-unknown { background: var(--surface2); color: var(--text2); }
+  .badge-type    { background: var(--surface2); color: var(--text2); }
+  .badge-admin   { background: var(--amber-bg); color: var(--amber); }
+  .badge-modify  { background: var(--blue-bg); color: var(--blue); }
+  .badge-read    { background: var(--surface2); color: var(--text2); }
+
+  /* ── Panel / card ── */
+  .panel { background: var(--surface); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 1.25rem; }
+  .panel-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
+
+  /* ── Modal ── */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: flex-start; justify-content: center; padding-top: 60px; z-index: 500; }
+  .modal { background: var(--surface); border-radius: var(--radius-lg); border: 0.5px solid var(--border2); padding: 1.5rem; width: 100%; max-width: 520px; max-height: 85vh; overflow-y: auto; }
+  .modal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.25rem; }
+  .modal-title { font-size: 16px; font-weight: 600; }
+  .close-btn { background: none; border: none; font-size: 20px; cursor: pointer; color: var(--text2); line-height: 1; padding: 0 2px; }
+  .close-btn:hover { color: var(--text); }
+
+  /* ── Scan ── */
+  .scan-subnet-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .scan-subnet-row input { flex: 1; font-size: 13px; padding: 7px 10px; border: 0.5px solid var(--border2); border-radius: var(--radius); background: var(--surface); color: var(--text); font-family: monospace; }
+  .scan-log { background: var(--surface2); border-radius: var(--radius); padding: 10px 12px; font-family: monospace; font-size: 12px; min-height: 100px; max-height: 260px; overflow-y: auto; }
+  .scan-log-line { margin-bottom: 3px; color: var(--text2); }
+  .scan-log-line.ok   { color: var(--green); }
+  .scan-log-line.warn { color: var(--amber); }
+  .progress-wrap { width: 100%; background: var(--surface2); border-radius: 4px; height: 5px; margin: 8px 0; overflow: hidden; }
+  .progress-bar  { height: 5px; background: var(--green); border-radius: 4px; transition: width 0.3s; }
+  .tag { display: inline-flex; font-size: 11px; padding: 3px 9px; border-radius: 20px; background: var(--surface2); color: var(--text2); cursor: pointer; border: 0.5px solid var(--border); margin: 2px; transition: all 0.1s; }
+  .tag.active { background: var(--blue-bg); color: var(--blue); border-color: #B5D4F4; }
+
+  /* ── Chart ── */
+  .chart-wrap { position: relative; width: 100%; height: 220px; }
+  .chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+
+  /* ── Audit log ── */
+  .audit-action { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 20px; white-space: nowrap; }
+  .audit-create { background: var(--green-bg); color: var(--green); }
+  .audit-update { background: var(--blue-bg); color: var(--blue); }
+  .audit-delete { background: var(--red-bg); color: var(--red); }
+  .audit-login  { background: var(--surface2); color: var(--text2); }
+
+  /* ── Toast ── */
+  #toast { position: fixed; bottom: 1.5rem; right: 1.5rem; background: var(--accent); color: #fff; padding: 10px 16px; border-radius: var(--radius); font-size: 13px; z-index: 9999; opacity: 0; transition: opacity 0.2s; pointer-events: none; }
+  #toast.show { opacity: 1; }
+
+  .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .empty { text-align: center; padding: 3rem; color: var(--text3); font-size: 13px; }
+  .detail-row { border-bottom: 0.5px solid var(--border); padding: 7px 0; display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .detail-key { font-size: 12px; color: var(--text2); flex-shrink: 0; }
+  .detail-val { font-size: 13px; text-align: right; }
+  /* Schedule & alerts panel */
+  .schedule-panel { display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-top:1rem; }
+  .stat-row { display:flex; justify-content:space-between; align-items:baseline; padding:6px 0; border-bottom:0.5px solid var(--border); font-size:13px; }
+  .stat-row:last-child { border-bottom:none; }
+  .stat-key { color:var(--text2); }
+  .stat-val { font-weight:500; }
+  .preset-btn { padding:7px 14px; font-size:13px; border:0.5px solid var(--border2); border-radius:var(--radius); background:var(--surface); color:var(--text2); cursor:pointer; transition:all 0.1s; }
+  .preset-btn:hover { background:var(--surface2); color:var(--text); }
+  .preset-btn.active { background:var(--accent); color:#fff; border-color:transparent; }
+  .toggle-switch { position:relative; display:inline-block; width:40px; height:22px; }
+  .toggle-switch input { opacity:0; width:0; height:0; }
+  .toggle-slider { position:absolute; cursor:pointer; inset:0; background:var(--surface2); border:0.5px solid var(--border2); border-radius:22px; transition:0.2s; }
+  .toggle-slider:before { position:absolute; content:""; height:16px; width:16px; left:2px; bottom:2px; background:var(--text3); border-radius:50%; transition:0.2s; }
+  input:checked + .toggle-slider { background:var(--accent); border-color:transparent; }
+  input:checked + .toggle-slider:before { transform:translateX(18px); background:#fff; }
+  .countdown { font-family:var(--font-mono, monospace); font-size:13px; color:var(--text2); }
+  .status-ok     { color:var(--green); font-weight:500; }
+  .status-error  { color:var(--red);   font-weight:500; }
+
+  /* Admin system warning banner */
+  .admin-banner { display:none; align-items:center; gap:10px; background:var(--amber-bg); color:var(--amber); font-size:13px; padding:10px 16px; border-radius:var(--radius); margin-bottom:1.25rem; border:0.5px solid #FAC775; }
+  .admin-banner svg { flex-shrink:0; }
+  .admin-banner-text { flex:1; }
+  .admin-banner-dismiss { background:none; border:none; color:var(--amber); cursor:pointer; font-size:16px; padding:0 2px; line-height:1; opacity:0.7; }
+  .admin-banner-dismiss:hover { opacity:1; }
+  .export-wrap { position:relative; display:inline-block; }
+  .export-menu { position:absolute; top:calc(100% + 4px); right:0; background:var(--surface); border:0.5px solid var(--border2); border-radius:var(--radius); box-shadow:0 4px 12px rgba(0,0,0,0.1); z-index:200; min-width:200px; padding:4px 0; }
+  .export-menu-item { display:flex; align-items:center; gap:8px; padding:8px 14px; font-size:13px; color:var(--text); cursor:pointer; border:none; background:none; width:100%; text-align:left; }
+  .export-menu-item:hover { background:var(--surface2); }
+  .export-menu-sep { height:0.5px; background:var(--border); margin:4px 0; }
+  .export-menu-label { font-size:10px; font-weight:600; color:var(--text3); text-transform:uppercase; letter-spacing:0.06em; padding:6px 14px 2px; }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: spin 0.6s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .role-badge { display: inline-flex; align-items: center; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 20px; }
+</style>
+</head>
+<body>
+
+<!-- ── Login screen ── -->
+<div id="login-screen">
+  <div class="login-card">
+    <div class="login-title">NetTrack</div>
+    <div class="login-sub">Network device inventory</div>
+    <div class="login-error" id="login-error"></div>
+    <div class="field"><label>Email</label><input type="email" id="login-email" placeholder="you@company.com" /></div>
+    <div class="field"><label>Password</label><input type="password" id="login-password" placeholder="••••••••" /></div>
+    <button class="btn primary full" id="login-btn" onclick="doLogin()">Sign in</button>
+    <div class="login-divider"><span>or</span></div>
+    <button class="btn sso full" onclick="doSSOLogin()">Sign in with SSO</button>
+  </div>
+</div>
+
+<!-- ── Main app ── -->
+<div id="app">
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-title">NetTrack</div>
+      <div class="sidebar-logo-sub">Network inventory</div>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="nav-section">Inventory</div>
+      <button class="nav-item active" onclick="showPage('devices')" id="nav-devices">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+        Devices
+      </button>
+      <button class="nav-item" onclick="showPage('topology')" id="nav-topology">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M12 7v4M12 11l-5 6M12 11l5 6"/></svg>
+        By switch
+      </button>
+      <button class="nav-item" onclick="showPage('scan')" id="nav-scan">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        Network scan
+      </button>
+      <button class="nav-item" onclick="showPage('charts')" id="nav-charts">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+        Analytics
+      </button>
+      <div class="nav-section admin-only" style="display:none;">Admin</div>
+      <button class="nav-item admin-only" style="display:none;" onclick="showPage('users')" id="nav-users">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        Users
+      </button>
+      <button class="nav-item admin-only" style="display:none;" onclick="showPage('audit')" id="nav-audit">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+        Audit log
+      </button>
+    </nav>
+    <div class="sidebar-user">
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        <div>
+          <div class="sidebar-user-name" id="sb-name">—</div>
+          <div class="sidebar-user-role" id="sb-role">—</div>
+          <div class="sidebar-user-email" id="sb-email">—</div>
+        </div>
+        <button class="btn btn-sm" onclick="doLogout()" title="Sign out">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        </button>
+      </div>
+    </div>
+  </aside>
+
+  <main class="main">
+
+    <!-- Admin system warning banner — shown to admins only -->
+    <div class="admin-banner admin-only" id="system-banner" style="display:none;">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      <span class="admin-banner-text" id="system-banner-text"></span>
+      <button class="admin-banner-dismiss" onclick="document.getElementById('system-banner').style.display='none'" title="Dismiss">×</button>
+    </div>
+
+    <!-- Devices -->
+    <div id="page-devices">
+      <div class="page-header">
+        <div><div class="page-title">Devices</div></div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn modify-only" style="display:none;" onclick="openAddDevice()">+ Add device</button>
+          <button class="btn primary" onclick="showPage('scan')">Scan network</button>
+        </div>
+      </div>
+      <div class="metrics" id="metrics"></div>
+      <div class="toolbar">
+        <input type="text" id="search" placeholder="Search hostname, IP, MAC..." oninput="renderTable()" />
+        <select id="filter-type" onchange="renderTable()">
+          <option value="">All types</option>
+          <option>Camera</option><option>Access Control</option><option>Intercom</option>
+          <option>Switch</option><option>WAP</option><option>Server</option><option>Printer</option><option>Other</option>
+        </select>
+        <select id="filter-status" onchange="renderTable()">
+          <option value="">All statuses</option>
+          <option>Online</option><option>Offline</option><option>Unknown</option>
+        </select>
+        <select id="filter-switch" onchange="renderTable()"><option value="">All switches</option></select>
+        <select id="filter-floor" onchange="renderTable()"><option value="">All floors</option></select>
+        <div class="export-wrap">
+          <button class="btn" onclick="toggleExportMenu('devices-export-menu')">Export ↓</button>
+          <div class="export-menu" id="devices-export-menu" style="display:none;">
+            <div class="export-menu-label">CSV</div>
+            <button class="export-menu-item" onclick="exportCSV('filtered');closeExportMenus()">Current view (filtered)</button>
+            <button class="export-menu-item" onclick="exportCSV('all');closeExportMenus()">Full inventory</button>
+            <button class="export-menu-item" onclick="exportCSV('switch');closeExportMenus()">Per-switch report</button>
+            <div class="export-menu-sep"></div>
+            <div class="export-menu-label">PDF</div>
+            <button class="export-menu-item" onclick="exportPDF('filtered');closeExportMenus()">Current view (filtered)</button>
+            <button class="export-menu-item" onclick="exportPDF('all');closeExportMenus()">Full inventory</button>
+            <button class="export-menu-item" onclick="exportPDF('switch');closeExportMenus()">Per-switch report</button>
+          </div>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th onclick="sortBy('hostname')">Hostname ↕</th>
+            <th onclick="sortBy('ip')">IP ↕</th>
+            <th onclick="sortBy('type')">Type ↕</th>
+            <th onclick="sortBy('status')">Status ↕</th>
+            <th onclick="sortBy('floor')">Floor ↕</th>
+            <th onclick="sortBy('location')">Location ↕</th>
+            <th onclick="sortBy('switch')">Switch ↕</th>
+            <th>Port</th>
+            <th>MAC</th>
+            <th>VLAN</th>
+            <th>Last seen</th>
+            <th></th>
+          </tr></thead>
+          <tbody id="table-body"></tbody>
+        </table>
+        <div id="table-empty" class="empty" style="display:none;">No devices match your filters.</div>
+        <div id="table-loading" class="empty">Loading...</div>
+      </div>
+    </div>
+
+    <!-- By switch -->
+    <div id="page-topology" style="display:none;">
+      <div class="page-header"><div class="page-title">By switch</div></div>
+      <div id="topology-content"></div>
+    </div>
+
+    <!-- Scan -->
+    <div id="page-scan" style="display:none;">
+      <div class="page-header"><div class="page-title">Network scan</div></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+        <div class="panel">
+          <div class="panel-title">Configure scan</div>
+          <div id="subnet-list">
+            <div class="scan-subnet-row"><input type="text" value="10.0.1.0/24" class="subnet-input"/><button class="btn danger btn-sm" onclick="removeSubnet(this)">✕</button></div>
+            <div class="scan-subnet-row"><input type="text" value="10.0.2.0/24" class="subnet-input"/><button class="btn danger btn-sm" onclick="removeSubnet(this)">✕</button></div>
+          </div>
+          <button class="btn btn-sm" onclick="addSubnet()" style="margin-bottom:12px;">+ Add subnet</button>
+          <div class="field" style="margin-bottom:12px;">
+            <label>Discovery methods</label>
+            <div style="margin-top:4px;">
+              <span class="tag active">Ping sweep</span>
+              <span class="tag active">SNMP</span>
+              <span class="tag active">LLDP</span>
+              <span class="tag active">ARP</span>
+              <span class="tag active">MAC lookup</span>
+            </div>
+          </div>
+          <div class="field" style="margin-bottom:14px;"><label>SNMP community</label><input type="text" id="snmp-community" value="public"/></div>
+          <button class="btn primary modify-only" id="scan-btn" onclick="startScan()">Start scan</button>
+        </div>
+        <div class="panel">
+          <div class="panel-title">Output</div>
+          <div class="progress-wrap"><div class="progress-bar" id="scan-progress" style="width:0%"></div></div>
+          <div class="scan-log" id="scan-log"><div class="scan-log-line">Ready. Click Start scan to begin.</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Charts -->
+    <div id="page-charts" style="display:none;">
+      <div class="page-header"><div class="page-title">Analytics</div></div>
+      <div class="chart-grid">
+        <div class="panel"><div class="panel-title">Devices by type</div><div class="chart-wrap"><canvas id="chart-type"></canvas></div></div>
+        <div class="panel"><div class="panel-title">Status overview</div><div class="chart-wrap"><canvas id="chart-status"></canvas></div></div>
+        <div class="panel" style="grid-column:1/-1;"><div class="panel-title">Devices per switch</div><div class="chart-wrap" style="height:160px;"><canvas id="chart-switch"></canvas></div></div>
+      </div>
+    </div>
+
+    <!-- Users (admin) -->
+    <div id="page-users" style="display:none;">
+      <div class="page-header">
+        <div><div class="page-title">Users</div></div>
+        <button class="btn primary" onclick="openAddUser()">+ Invite user</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Name</th><th>Email</th><th>Role</th><th>Auth</th><th>Status</th><th>Created</th><th></th>
+          </tr></thead>
+          <tbody id="users-body"></tbody>
+        </table>
+        <div id="users-empty" class="empty" style="display:none;">No users found.</div>
+        <div id="users-loading" class="empty">Loading...</div>
+      </div>
+    </div>
+
+    <!-- Audit log (admin) -->
+    <div id="page-audit" style="display:none;">
+      <div class="page-header"><div class="page-title">Audit log</div></div>
+      <div class="toolbar" style="margin-bottom:1rem;">
+        <select id="audit-resource" onchange="loadAuditLog()">
+          <option value="">All resources</option>
+          <option value="device">Device</option><option value="switch">Switch</option>
+          <option value="user">User</option><option value="session">Session</option>
+        </select>
+        <select id="audit-action" onchange="loadAuditLog()">
+          <option value="">All actions</option>
+          <option value="create">Create</option><option value="update">Update</option>
+          <option value="delete">Delete</option><option value="login">Login</option><option value="logout">Logout</option>
+        </select>
+        <div class="export-wrap">
+          <button class="btn" onclick="toggleExportMenu('audit-export-menu')">Export ↓</button>
+          <div class="export-menu" id="audit-export-menu" style="display:none;">
+            <div class="export-menu-label">CSV</div>
+            <button class="export-menu-item" onclick="exportAuditCSV();closeExportMenus()">Audit log (CSV)</button>
+            <div class="export-menu-sep"></div>
+            <div class="export-menu-label">PDF</div>
+            <button class="export-menu-item" onclick="exportAuditPDF();closeExportMenus()">Audit log (PDF)</button>
+          </div>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Time</th><th>User</th><th>Action</th><th>Resource</th><th>Detail</th></tr></thead>
+          <tbody id="audit-body"></tbody>
+        </table>
+        <div id="audit-empty" class="empty" style="display:none;">No log entries found.</div>
+        <div id="audit-loading" class="empty">Loading...</div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<!-- Modal container -->
+<div id="modal-container"></div>
+
+<script>
+// ── Config ────────────────────────────────────────────────────────────────────
+const API = window.NETTRACK_API_URL || '';   // set to '' for same-origin, or 'http://your-server:8000'
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let currentUser = null;
+let devices = [];
+let sortCol = 'hostname', sortDir = 1;
+let chartsRendered = false;
+let editingDeviceId = null;
+let editingUserId = null;
+
+// ── Token management ──────────────────────────────────────────────────────────
+// ── API fetch — cookies handled automatically by the browser ──────────────────
+// credentials: 'include' ensures HttpOnly cookies are sent on every request,
+// including cross-origin requests when API and frontend are on different ports.
+// No tokens are ever stored in JS — the browser manages the cookie jar.
+
+let _refreshing = null;   // deduplicate concurrent refresh attempts
+
+async function apiFetch(path, options = {}) {
+  const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+  let res = await fetch(API + path, { ...options, headers, credentials: 'include' });
+
+  if (res.status === 401) {
+    // Attempt a single token refresh, deduplicating concurrent calls
+    if (!_refreshing) {
+      _refreshing = fetch(API + '/api/auth/refresh', {
+        method: 'POST',
+        credentials: 'include',
+      }).finally(() => { _refreshing = null; });
+    }
+    const r = await _refreshing;
+    if (r && r.ok) {
+      // Retry the original request — new access cookie is now set
+      res = await fetch(API + path, { ...options, headers, credentials: 'include' });
+    } else {
+      showLoginScreen();
+      return null;
+    }
+  }
+  return res;
+}
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+async function doLogin() {
+  const email = document.getElementById('login-email').value.trim();
+  const pwd   = document.getElementById('login-password').value;
+  const btn   = document.getElementById('login-btn');
+  const err   = document.getElementById('login-error');
+  err.style.display = 'none';
+  btn.innerHTML = '<span class="spinner"></span>';
+  btn.disabled = true;
+
+  try {
+    // Login sets an HttpOnly cookie — no token handling needed here
+    const res = await fetch(API + '/api/auth/login', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ username: email, password: pwd }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      err.textContent = data.detail || 'Login failed';
+      err.style.display = '';
+    } else {
+      await initApp();
+    }
+  } catch(e) {
+    err.textContent = 'Could not reach server. Check API_URL configuration.';
+    err.style.display = '';
+  } finally {
+    btn.textContent = 'Sign in';
+    btn.disabled = false;
+  }
+}
+
+function doSSOLogin() {
+  // Server redirects to OIDC provider; on return sets cookies and redirects to /
+  window.location.href = API + '/api/auth/sso/login';
+}
+
+async function doLogout() {
+  // Server clears the HttpOnly cookie
+  await apiFetch('/api/auth/logout', { method: 'POST' });
+  showLoginScreen();
+}
+
+function showLoginScreen() {
+  document.getElementById('login-screen').style.display = 'flex';
+  document.getElementById('app').style.display = 'none';
+  currentUser = null;
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+async function initApp() {
+  const res = await apiFetch('/api/users/me');
+  if (!res || !res.ok) { showLoginScreen(); return; }
+  currentUser = await res.json();
+
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  document.getElementById('sb-name').textContent  = currentUser.full_name || currentUser.email;
+  document.getElementById('sb-role').textContent  = currentUser.role.replace('_', ' ');
+  document.getElementById('sb-email').textContent = currentUser.email;
+
+  // Show admin-only nav items and load system status
+  if (currentUser.role === 'admin') {
+    document.querySelectorAll('.admin-only').forEach(el => el.style.display = '');
+    loadScanStatus();   // check ping capability and show banner if needed
+  }
+  // Show modify-only buttons
+  if (currentUser.role === 'modify' || currentUser.role === 'admin') {
+    document.querySelectorAll('.modify-only').forEach(el => el.style.display = '');
+  }
+
+  // Tags toggle
+  document.querySelectorAll('.tag').forEach(t => t.addEventListener('click', () => t.classList.toggle('active')));
+
+  await loadDevices();
+  showPage('devices');
+}
+
+// ── Devices ───────────────────────────────────────────────────────────────────
+async function loadDevices() {
+  document.getElementById('table-loading').style.display = '';
+  document.getElementById('table-body').innerHTML = '';
+  const res = await apiFetch('/api/devices');
+  document.getElementById('table-loading').style.display = 'none';
+  if (!res || !res.ok) { showToast('Failed to load devices'); return; }
+  devices = await res.json();
+  populateFilters();
+  renderMetrics();
+  renderTable();
+}
+
+function getFiltered() {
+  const q   = document.getElementById('search').value.toLowerCase();
+  const ft  = document.getElementById('filter-type').value;
+  const fs  = document.getElementById('filter-status').value;
+  const fsw = document.getElementById('filter-switch').value;
+  const ff  = document.getElementById('filter-floor').value;
+  return devices.filter(d => {
+    if (q  && !`${d.hostname} ${d.ip} ${d.mac} ${d.location} ${d.floor}`.toLowerCase().includes(q)) return false;
+    if (ft  && d.type   !== ft)  return false;
+    if (fs  && d.status !== fs)  return false;
+    if (fsw && d.switch !== fsw) return false;
+    if (ff  && d.floor  !== ff)  return false;
+    return true;
+  }).sort((a, b) => {
+    const av = (a[sortCol] || '').toString().toLowerCase();
+    const bv = (b[sortCol] || '').toString().toLowerCase();
+    return av < bv ? -sortDir : av > bv ? sortDir : 0;
+  });
+}
+
+function statusBadge(s) {
+  const cls = s === 'Online' ? 'badge-online' : s === 'Offline' ? 'badge-offline' : 'badge-unknown';
+  return `<span class="badge ${cls}">${s}</span>`;
+}
+
+function fmtDate(d) {
+  if (!d) return '—';
+  return new Date(d).toLocaleString(undefined, { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
+}
+
+function renderTable() {
+  const rows  = getFiltered();
+  const tbody = document.getElementById('table-body');
+  const empty = document.getElementById('table-empty');
+  if (!rows.length) { tbody.innerHTML = ''; empty.style.display = ''; return; }
+  empty.style.display = 'none';
+  const canEdit = currentUser && (currentUser.role === 'modify' || currentUser.role === 'admin');
+  const canDel  = currentUser && currentUser.role === 'admin';
+  tbody.innerHTML = rows.map(d => `
+    <tr>
+      <td><strong style="font-weight:500;">${d.hostname || '—'}</strong></td>
+      <td class="mono">${d.ip || '—'}</td>
+      <td><span class="badge badge-type">${d.type || '—'}</span></td>
+      <td>${statusBadge(d.status || 'Unknown')}</td>
+      <td>${d.floor || '—'}</td>
+      <td style="color:var(--text2);font-size:12px;">${d.location || '—'}</td>
+      <td class="mono">${d.switch || '—'}</td>
+      <td class="mono">${d.port || '—'}</td>
+      <td class="mono">${d.mac || '—'}</td>
+      <td style="font-size:12px;color:var(--text2);">${d.vlan || '—'}</td>
+      <td style="font-size:12px;color:var(--text2);white-space:nowrap;">${fmtDate(d.last_seen)}</td>
+      <td style="white-space:nowrap;">
+        <button class="btn btn-sm" onclick="openDetail(${d.id})">View</button>
+        ${canEdit ? `<button class="btn btn-sm" style="margin-left:4px;" onclick="openEditDevice(${d.id})">Edit</button>` : ''}
+      </td>
+    </tr>`).join('');
+}
+
+function renderMetrics() {
+  const total   = devices.length;
+  const online  = devices.filter(d => d.status === 'Online').length;
+  const offline = devices.filter(d => d.status === 'Offline').length;
+  const unknown = devices.filter(d => d.status === 'Unknown').length;
+  document.getElementById('metrics').innerHTML = `
+    <div class="metric"><div class="metric-label">Total devices</div><div class="metric-value">${total}</div></div>
+    <div class="metric"><div class="metric-label">Online</div><div class="metric-value green">${online}</div></div>
+    <div class="metric"><div class="metric-label">Offline</div><div class="metric-value red">${offline}</div></div>
+    <div class="metric"><div class="metric-label">Unknown</div><div class="metric-value amber">${unknown}</div></div>
+  `;
+}
+
+function populateFilters() {
+  const switches = [...new Set(devices.map(d => d.switch).filter(Boolean))].sort();
+  const floors   = [...new Set(devices.map(d => d.floor).filter(Boolean))].sort((a, b) => {
+    const order = v => v === 'B2' ? -2 : v === 'B1' ? -1 : v === 'G' ? 0 : parseInt(v) || 99;
+    return order(a) - order(b);
+  });
+  document.getElementById('filter-switch').innerHTML =
+    '<option value="">All switches</option>' + switches.map(s => `<option>${s}</option>`).join('');
+  document.getElementById('filter-floor').innerHTML =
+    '<option value="">All floors</option>' + floors.map(f => `<option>${f}</option>`).join('');
+}
+
+function sortBy(col) {
+  if (sortCol === col) sortDir *= -1; else { sortCol = col; sortDir = 1; }
+  renderTable();
+}
+
+// ── Device detail / edit modal ────────────────────────────────────────────────
+function openDetail(id) {
+  const d = devices.find(x => x.id === id);
+  if (!d) return;
+  const canEdit = currentUser && (currentUser.role === 'modify' || currentUser.role === 'admin');
+  const canDel  = currentUser && currentUser.role === 'admin';
+  setModal(`
+    <div class="modal-header">
+      <div><div class="modal-title">${d.hostname || 'Device'}</div><div style="font-size:12px;color:var(--text2);margin-top:2px;">Floor ${d.floor || '—'} · ${d.location || '—'}</div></div>
+      <button class="close-btn" onclick="closeModal()">×</button>
+    </div>
+    ${statusBadge(d.status || 'Unknown')}
+    <div style="margin-top:1rem;">
+      ${[['IP', `<span class="mono">${d.ip||'—'}</span>`],['MAC',`<span class="mono">${d.mac||'—'}</span>`],
+         ['Type',d.type||'—'],['Floor',d.floor||'—'],['Location',d.location||'—'],
+         ['Switch',`<span class="mono">${d.switch||'—'}</span>`],['Port',`<span class="mono">${d.port||'—'}</span>`],
+         ['VLAN',d.vlan||'—'],['Last seen',fmtDate(d.last_seen)],['Notes',d.notes||'—']]
+        .map(([k,v])=>`<div class="detail-row"><span class="detail-key">${k}</span><span class="detail-val">${v}</span></div>`).join('')}
+    </div>
+    <div style="margin-top:1rem;display:flex;gap:8px;">
+      ${canEdit ? `<button class="btn" onclick="closeModal();openEditDevice(${d.id})">Edit</button>` : ''}
+      ${canDel  ? `<button class="btn danger" onclick="deleteDevice(${d.id})">Delete</button>` : ''}
+      <button class="btn" onclick="closeModal()">Close</button>
+    </div>`);
+}
+
+function openAddDevice() {
+  editingDeviceId = null;
+  showDeviceForm({status:'Unknown',type:'Camera',vlan:10});
+}
+
+function openEditDevice(id) {
+  editingDeviceId = id;
+  showDeviceForm(devices.find(d => d.id === id) || {});
+}
+
+function showDeviceForm(d) {
+  const title  = editingDeviceId ? 'Edit device' : 'Add device';
+  const floors = ['B2','B1','G','1','2','3','4','5','6','7','8','9','10'];
+  const types  = ['Camera','Access Control','Intercom','Switch','WAP','Server','Printer','Other'];
+  setModal(`
+    <div class="modal-header"><div class="modal-title">${title}</div><button class="close-btn" onclick="closeModal()">×</button></div>
+    <div class="field-row">
+      <div class="field"><label>Hostname</label><input id="f-hostname" value="${d.hostname||''}"/></div>
+      <div class="field"><label>IP address</label><input id="f-ip" value="${d.ip||''}"/></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>MAC address</label><input id="f-mac" value="${d.mac||''}"/></div>
+      <div class="field"><label>Type</label><select id="f-type">${types.map(t=>`<option${d.type===t?' selected':''}>${t}</option>`).join('')}</select></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Floor</label><select id="f-floor">${floors.map(f=>`<option${d.floor===f?' selected':''}>${f}</option>`).join('')}</select></div>
+      <div class="field"><label>Location</label><input id="f-location" value="${d.location||''}"/></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Status</label><select id="f-status">${['Online','Offline','Unknown'].map(s=>`<option${d.status===s?' selected':''}>${s}</option>`).join('')}</select></div>
+      <div class="field"><label>VLAN</label><input id="f-vlan" type="number" value="${d.vlan||''}"/></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Switch</label><input id="f-switch" value="${d.switch||''}"/></div>
+      <div class="field"><label>Port</label><input id="f-port" value="${d.port||''}"/></div>
+    </div>
+    <div class="field"><label>Notes</label><textarea id="f-notes">${d.notes||''}</textarea></div>
+    <div style="display:flex;gap:8px;margin-top:4px;">
+      <button class="btn primary" onclick="saveDevice()">Save</button>
+      <button class="btn" onclick="closeModal()">Cancel</button>
+    </div>`);
+}
+
+async function saveDevice() {
+  const data = {
+    hostname: document.getElementById('f-hostname').value.trim(),
+    ip:       document.getElementById('f-ip').value.trim(),
+    mac:      document.getElementById('f-mac').value.trim(),
+    type:     document.getElementById('f-type').value,
+    status:   document.getElementById('f-status').value,
+    floor:    document.getElementById('f-floor').value,
+    location: document.getElementById('f-location').value.trim(),
+    vlan:     parseInt(document.getElementById('f-vlan').value) || null,
+    switch:   document.getElementById('f-switch').value.trim(),
+    port:     document.getElementById('f-port').value.trim(),
+    notes:    document.getElementById('f-notes').value.trim(),
+  };
+  const method = editingDeviceId ? 'PUT' : 'POST';
+  const url    = editingDeviceId ? `/api/devices/${editingDeviceId}` : '/api/devices';
+  const res    = await apiFetch(url, { method, body: JSON.stringify(data) });
+  if (!res || !res.ok) { showToast('Save failed'); return; }
+  closeModal();
+  showToast(editingDeviceId ? 'Device updated' : 'Device created');
+  await loadDevices();
+  chartsRendered = false;
+}
+
+async function deleteDevice(id) {
+  if (!confirm('Delete this device? This cannot be undone.')) return;
+  const res = await apiFetch(`/api/devices/${id}`, { method: 'DELETE' });
+  if (!res || !res.ok) { showToast('Delete failed'); return; }
+  closeModal();
+  showToast('Device deleted');
+  await loadDevices();
+  chartsRendered = false;
+}
+
+// ── Topology ──────────────────────────────────────────────────────────────────
+function renderTopology() {
+  const switches = [...new Set(devices.map(d => d.switch).filter(Boolean))].sort();
+  document.getElementById('topology-content').innerHTML = switches.map(sw => {
+    const devs = devices.filter(d => d.switch === sw).sort((a, b) => (a.port || '').localeCompare(b.port || ''));
+    return `<div class="panel" style="margin-bottom:1rem;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+        <div class="panel-title" style="margin:0;">${sw}</div>
+        <span style="font-size:12px;color:var(--text2);">${devs.length} device${devs.length !== 1 ? 's' : ''}</span>
+      </div>
+      <table><thead><tr><th>Port</th><th>Hostname</th><th>IP</th><th>Type</th><th>Status</th><th>Floor</th><th>Location</th><th>VLAN</th></tr></thead>
+      <tbody>${devs.map(d => `<tr>
+        <td class="mono">${d.port||'—'}</td>
+        <td><strong style="font-weight:500;">${d.hostname||'—'}</strong></td>
+        <td class="mono">${d.ip||'—'}</td>
+        <td><span class="badge badge-type">${d.type||'—'}</span></td>
+        <td>${statusBadge(d.status||'Unknown')}</td>
+        <td>${d.floor||'—'}</td>
+        <td style="font-size:12px;color:var(--text2);">${d.location||'—'}</td>
+        <td style="font-size:12px;color:var(--text2);">${d.vlan||'—'}</td>
+      </tr>`).join('')}</tbody></table>
+    </div>`;
+  }).join('') || '<div class="empty">No devices loaded yet.</div>';
+}
+
+// ── Charts ────────────────────────────────────────────────────────────────────
+function renderCharts() {
+  if (chartsRendered) return;
+  chartsRendered = true;
+  const typeCount = {};
+  devices.forEach(d => typeCount[d.type] = (typeCount[d.type] || 0) + 1);
+  const clrs = ['#185FA5','#3B6D11','#854F0B','#A32D2D','#0F6E56','#993C1D','#534AB7','#555'];
+  new Chart(document.getElementById('chart-type'), {
+    type: 'doughnut',
+    data: { labels: Object.keys(typeCount), datasets: [{ data: Object.values(typeCount), backgroundColor: clrs, borderWidth: 0 }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { font: { size: 12 }, boxWidth: 12 } } } },
+  });
+  const online  = devices.filter(d => d.status === 'Online').length;
+  const offline = devices.filter(d => d.status === 'Offline').length;
+  const unknown = devices.filter(d => d.status === 'Unknown').length;
+  new Chart(document.getElementById('chart-status'), {
+    type: 'doughnut',
+    data: { labels: ['Online','Offline','Unknown'], datasets: [{ data: [online, offline, unknown], backgroundColor: ['#3B6D11','#A32D2D','#854F0B'], borderWidth: 0 }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { font: { size: 12 }, boxWidth: 12 } } } },
+  });
+  const switches  = [...new Set(devices.map(d => d.switch).filter(Boolean))].sort();
+  const swCounts  = switches.map(s => devices.filter(d => d.switch === s).length);
+  new Chart(document.getElementById('chart-switch'), {
+    type: 'bar',
+    data: { labels: switches, datasets: [{ data: swCounts, backgroundColor: '#185FA5', borderRadius: 4, borderSkipped: false }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } }, x: { grid: { display: false } } } },
+  });
+}
+
+// ── Scan ──────────────────────────────────────────────────────────────────────
+function addSubnet() {
+  const row = document.createElement('div');
+  row.className = 'scan-subnet-row';
+  row.innerHTML = `<input type="text" value="10.0.0.0/24" class="subnet-input"/><button class="btn danger btn-sm" onclick="removeSubnet(this)">✕</button>`;
+  document.getElementById('subnet-list').appendChild(row);
+}
+function removeSubnet(btn) { btn.parentElement.remove(); }
+
+function startScan() {
+  const subnets = [...document.querySelectorAll('.subnet-input')].map(i => i.value.trim()).filter(Boolean);
+  if (!subnets.length) return;
+  const log = document.getElementById('scan-log');
+  const bar = document.getElementById('scan-progress');
+  const btn = document.getElementById('scan-btn');
+  log.innerHTML = ''; bar.style.width = '0%'; btn.disabled = true; btn.textContent = 'Scanning...';
+  const lines = [
+    {t:200,cls:'',msg:'[+] Starting network discovery...'},
+    {t:500,cls:'',msg:`[+] Subnets: ${subnets.join(', ')}`},
+    {t:900,cls:'',msg:'[~] Sending ICMP ping sweep...'},
+    {t:1400,cls:'ok',msg:'[✓] 10.0.1.11 — responding (8ms)'},
+    {t:1700,cls:'ok',msg:'[✓] 10.0.1.12 — responding (12ms)'},
+    {t:1900,cls:'warn',msg:'[!] 10.0.1.13 — no response (timeout)'},
+    {t:2400,cls:'',msg:'[~] Running ARP collection...'},
+    {t:2900,cls:'ok',msg:'[✓] ARP: 10.0.1.11 → AA:BB:CC:11:22:01'},
+    {t:3300,cls:'',msg:'[~] Querying SNMP...'},
+    {t:3700,cls:'ok',msg:'[✓] SNMP: SW-01 — Cisco IOS 15.2'},
+    {t:4100,cls:'warn',msg:'[!] SNMP: 10.0.1.13 — community string rejected'},
+    {t:4500,cls:'',msg:'[~] Collecting LLDP neighbors...'},
+    {t:4900,cls:'ok',msg:'[✓] LLDP: cam-lobby-01 → SW-01 Gi0/1'},
+    {t:5300,cls:'ok',msg:'[✓] LLDP: ac-door-01 → SW-01 Gi0/5'},
+    {t:5600,cls:'',msg:'[~] MAC OUI lookup...'},
+    {t:5900,cls:'ok',msg:'[✓] AA:BB:CC:11:22:xx → Hikvision'},
+    {t:6200,cls:'ok',msg:'[✓] Scan complete. 11 hosts up, 1 offline.'},
+    {t:6400,cls:'ok',msg:'[✓] 3 new devices found. 9 records updated.'},
+  ];
+  const total = lines[lines.length - 1].t;
+  lines.forEach(({ t, cls, msg }) => {
+    setTimeout(() => {
+      const div = document.createElement('div');
+      div.className = `scan-log-line ${cls}`;
+      div.textContent = msg;
+      log.appendChild(div);
+      log.scrollTop = log.scrollHeight;
+      bar.style.width = Math.round((t / total) * 100) + '%';
+      if (t === total) { btn.disabled = false; btn.textContent = 'Start scan'; loadDevices(); }
+    }, t);
+  });
+}
+
+// ── Users ─────────────────────────────────────────────────────────────────────
+async function loadUsers() {
+  document.getElementById('users-loading').style.display = '';
+  document.getElementById('users-body').innerHTML = '';
+  const res = await apiFetch('/api/users');
+  document.getElementById('users-loading').style.display = 'none';
+  if (!res || !res.ok) { showToast('Failed to load users'); return; }
+  const users = await res.json();
+  const empty = document.getElementById('users-empty');
+  if (!users.length) { empty.style.display = ''; return; }
+  empty.style.display = 'none';
+  document.getElementById('users-body').innerHTML = users.map(u => `
+    <tr>
+      <td><strong style="font-weight:500;">${u.full_name || '—'}</strong></td>
+      <td style="color:var(--text2);font-size:12px;">${u.email}</td>
+      <td>${roleBadge(u.role)}</td>
+      <td style="font-size:12px;color:var(--text2);">${u.auth_provider}</td>
+      <td>${u.is_active ? '<span class="badge badge-online">Active</span>' : '<span class="badge badge-offline">Inactive</span>'}</td>
+      <td style="font-size:12px;color:var(--text2);">${fmtDate(u.created_at)}</td>
+      <td style="white-space:nowrap;">
+        <button class="btn btn-sm" onclick="openEditUser(${u.id})">Edit</button>
+        ${u.id !== currentUser.id ? `<button class="btn btn-sm danger" style="margin-left:4px;" onclick="deleteUser(${u.id})">Delete</button>` : ''}
+      </td>
+    </tr>`).join('');
+}
+
+function roleBadge(role) {
+  const map = { admin: 'badge-admin', modify: 'badge-modify', read_only: 'badge-read' };
+  const label = role === 'read_only' ? 'Read only' : role.charAt(0).toUpperCase() + role.slice(1);
+  return `<span class="badge ${map[role] || 'badge-read'}">${label}</span>`;
+}
+
+function openAddUser() {
+  editingUserId = null;
+  showUserForm({role:'read_only',is_active:true});
+}
+
+async function openEditUser(id) {
+  editingUserId = id;
+  const res = await apiFetch(`/api/users`);
+  if (!res || !res.ok) return;
+  const users = await res.json();
+  showUserForm(users.find(u => u.id === id) || {});
+}
+
+function showUserForm(u) {
+  const title = editingUserId ? 'Edit user' : 'Invite user';
+  setModal(`
+    <div class="modal-header"><div class="modal-title">${title}</div><button class="close-btn" onclick="closeModal()">×</button></div>
+    <div class="field-row">
+      <div class="field"><label>Full name</label><input id="uf-name" value="${u.full_name||''}"/></div>
+      <div class="field"><label>Email</label><input id="uf-email" type="email" value="${u.email||''}" ${editingUserId?'disabled':''}/></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Role</label>
+        <select id="uf-role">
+          <option value="read_only" ${u.role==='read_only'?'selected':''}>Read only</option>
+          <option value="modify"    ${u.role==='modify'?'selected':''}>Modify</option>
+          <option value="admin"     ${u.role==='admin'?'selected':''}>Admin</option>
+        </select>
+      </div>
+      <div class="field"><label>Status</label>
+        <select id="uf-active">
+          <option value="true"  ${u.is_active!==false?'selected':''}>Active</option>
+          <option value="false" ${u.is_active===false?'selected':''}>Inactive</option>
+        </select>
+      </div>
+    </div>
+    <div class="field"><label>${editingUserId ? 'New password (leave blank to keep)' : 'Password'}</label><input id="uf-password" type="password" placeholder="••••••••"/></div>
+    <div style="display:flex;gap:8px;margin-top:4px;">
+      <button class="btn primary" onclick="saveUser()">Save</button>
+      <button class="btn" onclick="closeModal()">Cancel</button>
+    </div>`);
+}
+
+async function saveUser() {
+  const data = {
+    full_name: document.getElementById('uf-name').value.trim(),
+    role:      document.getElementById('uf-role').value,
+    is_active: document.getElementById('uf-active').value === 'true',
+  };
+  const pwd = document.getElementById('uf-password').value;
+  if (pwd) data.password = pwd;
+
+  let res;
+  if (editingUserId) {
+    res = await apiFetch(`/api/users/${editingUserId}`, { method: 'PUT', body: JSON.stringify(data) });
+  } else {
+    data.email = document.getElementById('uf-email').value.trim();
+    res = await apiFetch('/api/users', { method: 'POST', body: JSON.stringify(data) });
+  }
+  if (!res || !res.ok) {
+    const err = await res?.json();
+    showToast(err?.detail || 'Save failed'); return;
+  }
+  closeModal();
+  showToast(editingUserId ? 'User updated' : 'User created');
+  loadUsers();
+}
+
+async function deleteUser(id) {
+  if (!confirm('Delete this user?')) return;
+  const res = await apiFetch(`/api/users/${id}`, { method: 'DELETE' });
+  if (!res || !res.ok) { showToast('Delete failed'); return; }
+  showToast('User deleted');
+  loadUsers();
+}
+
+// ── Audit log ─────────────────────────────────────────────────────────────────
+let auditLogs = [];
+async function loadAuditLog() {
+  document.getElementById('audit-loading').style.display = '';
+  document.getElementById('audit-body').innerHTML = '';
+  const resource = document.getElementById('audit-resource').value;
+  const action   = document.getElementById('audit-action').value;
+  const params   = new URLSearchParams();
+  if (resource) params.set('resource', resource);
+  if (action)   params.set('action', action);
+  const res = await apiFetch(`/api/audit?${params}`);
+  document.getElementById('audit-loading').style.display = 'none';
+  if (!res || !res.ok) { showToast('Failed to load audit log'); return; }
+  auditLogs = await res.json();
+  const logs = auditLogs;
+  const empty = document.getElementById('audit-empty');
+  if (!logs.length) { empty.style.display = ''; return; }
+  empty.style.display = 'none';
+  document.getElementById('audit-body').innerHTML = logs.map(l => {
+    const cls = l.action.startsWith('create') ? 'audit-create' : l.action.startsWith('update') ? 'audit-update' : l.action.startsWith('delete') ? 'audit-delete' : 'audit-login';
+    return `<tr>
+      <td style="font-size:12px;color:var(--text2);white-space:nowrap;">${fmtDate(l.created_at)}</td>
+      <td style="font-size:12px;">${l.user_id || '—'}</td>
+      <td><span class="audit-action ${cls}">${l.action}</span></td>
+      <td style="font-size:12px;color:var(--text2);">${l.resource}${l.resource_id ? ` #${l.resource_id}` : ''}</td>
+      <td style="font-size:12px;color:var(--text2);">${l.detail || '—'}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Page routing ──────────────────────────────────────────────────────────────
+const pages = ['devices','topology','scan','charts','users','audit'];
+function showPage(name) {
+  pages.forEach(p => {
+    document.getElementById(`page-${p}`).style.display   = p === name ? '' : 'none';
+    const nav = document.getElementById(`nav-${p}`);
+    if (nav) nav.classList.toggle('active', p === name);
+  });
+  if (name === 'topology')  renderTopology();
+  if (name === 'charts')    renderCharts();
+  if (name === 'users')     loadUsers();
+  if (name === 'audit')     loadAuditLog();
+  if (name === 'scan')      loadSchedule();
+}
+
+// ── Modal helpers ─────────────────────────────────────────────────────────────
+function setModal(html) {
+  document.getElementById('modal-container').innerHTML = `
+    <div class="modal-overlay" onclick="overlayClose(event)">
+      <div class="modal">${html}</div>
+    </div>`;
+}
+function overlayClose(e) { if (e.target.classList.contains('modal-overlay')) closeModal(); }
+function closeModal() { document.getElementById('modal-container').innerHTML = ''; }
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+let toastTimer;
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 2800);
+}
+
+// ── Export helpers ───────────────────────────────────────────────────────────
+
+function toggleExportMenu(id) {
+  closeExportMenus(id);
+  const menu = document.getElementById(id);
+  if (menu) menu.style.display = menu.style.display === 'none' ? '' : 'none';
+}
+function closeExportMenus(except) {
+  document.querySelectorAll('.export-menu').forEach(m => {
+    if (m.id !== except) m.style.display = 'none';
+  });
+}
+document.addEventListener('click', e => {
+  if (!e.target.closest('.export-wrap')) closeExportMenus();
+});
+
+function _timestamp() {
+  return new Date().toISOString().slice(0,16).replace('T','_').replace(':','-');
+}
+
+function _csvEscape(val) {
+  if (val == null) return '';
+  const s = String(val);
+  return s.includes(',') || s.includes('"') || s.includes('\n')
+    ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function _csvDownload(rows, filename) {
+  const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+// ── Device CSV exports ────────────────────────────────────────────────────────
+const DEVICE_COLS = ['hostname','ip','mac','type','status','floor','location','switch','port','vlan','notes'];
+const DEVICE_HDRS = ['Hostname','IP Address','MAC Address','Type','Status','Floor','Location','Switch','Port','VLAN','Notes'];
+
+function exportCSV(mode) {
+  const rows  = mode === 'filtered' ? getFiltered() : devices;
+  const lines = [DEVICE_HDRS.join(',')];
+
+  if (mode === 'switch') {
+    const switches = [...new Set(rows.map(d => d.switch).filter(Boolean))].sort();
+    for (const sw of switches) {
+      lines.push(`# Switch: ${sw}`);
+      const swRows = rows.filter(d => d.switch === sw)
+                         .sort((a,b) => (a.port||'').localeCompare(b.port||''));
+      swRows.forEach(d => lines.push(DEVICE_COLS.map(c => _csvEscape(d[c])).join(',')));
+      lines.push('');
+    }
+  } else {
+    rows.forEach(d => lines.push(DEVICE_COLS.map(c => _csvEscape(d[c])).join(',')));
+  }
+
+  const label = mode === 'switch' ? 'per-switch' : mode;
+  _csvDownload(lines, `nettrack_devices_${label}_${_timestamp()}.csv`);
+  showToast(`CSV downloaded (${rows.length} devices)`);
+}
+
+// ── Device PDF exports ────────────────────────────────────────────────────────
+function exportPDF(mode) {
+  const { jsPDF } = window.jspdf;
+  if (!jsPDF) { showToast('PDF library not loaded'); return; }
+
+  const rows = mode === 'filtered' ? getFiltered() : devices;
+  const doc  = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+  const ts   = new Date().toLocaleString();
+
+  // Header
+  doc.setFillColor(26, 26, 24);
+  doc.rect(0, 0, 297, 18, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(13);
+  doc.setFont('helvetica', 'bold');
+  doc.text('NetTrack', 10, 12);
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+  const subtitle = mode === 'switch' ? 'Per-switch port report'
+                 : mode === 'filtered' ? 'Filtered device inventory'
+                 : 'Full device inventory';
+  doc.text(subtitle, 50, 12);
+  doc.text(`Generated: ${ts}`, 297 - 10, 12, { align: 'right' });
+  doc.setTextColor(0, 0, 0);
+
+  const cols  = ['Hostname','IP','MAC','Type','Status','Floor','Location','Switch','Port','VLAN'];
+  const keys  = ['hostname','ip','mac','type','status','floor','location','switch','port','vlan'];
+  const widths = [32,24,28,20,16,12,28,20,16,12];
+
+  const statusColor = s =>
+    s === 'Online'  ? [59,109,17]  :
+    s === 'Offline' ? [163,45,45]  : [107,107,103];
+
+  if (mode === 'switch') {
+    const switches = [...new Set(rows.map(d => d.switch).filter(Boolean))].sort();
+    let startY = 24;
+    for (const sw of switches) {
+      const swRows = rows.filter(d => d.switch === sw)
+                         .sort((a,b) => (a.port||'').localeCompare(b.port||''));
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'bold');
+      doc.text(`Switch: ${sw}  (${swRows.length} device${swRows.length !== 1 ? 's' : ''})`, 10, startY);
+      doc.autoTable({
+        startY: startY + 3,
+        head: [cols],
+        body: swRows.map(d => keys.map(k => d[k] ?? '—')),
+        theme: 'grid',
+        styles: { fontSize: 7.5, cellPadding: 1.5, overflow: 'ellipsize' },
+        headStyles: { fillColor: [26,26,24], textColor: 255, fontStyle: 'bold', fontSize: 7 },
+        columnStyles: Object.fromEntries(widths.map((w,i) => [i, { cellWidth: w }])),
+        didParseCell: data => {
+          if (data.section === 'body' && data.column.index === 4) {
+            const [r,g,b] = statusColor(data.cell.raw);
+            data.cell.styles.textColor = [r,g,b];
+            data.cell.styles.fontStyle = 'bold';
+          }
+        },
+        margin: { left: 10, right: 10 },
+      });
+      startY = doc.lastAutoTable.finalY + 8;
+      if (startY > 175 && sw !== switches[switches.length-1]) {
+        doc.addPage();
+        startY = 24;
+      }
+    }
+  } else {
+    doc.autoTable({
+      startY: 24,
+      head: [cols],
+      body: rows.map(d => keys.map(k => d[k] ?? '—')),
+      theme: 'grid',
+      styles: { fontSize: 7.5, cellPadding: 1.5, overflow: 'ellipsize' },
+      headStyles: { fillColor: [26,26,24], textColor: 255, fontStyle: 'bold', fontSize: 7 },
+      columnStyles: Object.fromEntries(widths.map((w,i) => [i, { cellWidth: w }])),
+      didParseCell: data => {
+        if (data.section === 'body' && data.column.index === 4) {
+          const [r,g,b] = statusColor(data.cell.raw);
+          data.cell.styles.textColor = [r,g,b];
+          data.cell.styles.fontStyle = 'bold';
+        }
+      },
+      margin: { left: 10, right: 10 },
+    });
+  }
+
+  // Footer with page numbers
+  const pages = doc.internal.getNumberOfPages();
+  doc.setFontSize(8);
+  doc.setTextColor(150);
+  for (let i = 1; i <= pages; i++) {
+    doc.setPage(i);
+    doc.text(`Page ${i} of ${pages}`, 297 - 10, 205, { align: 'right' });
+  }
+
+  const label = mode === 'switch' ? 'per-switch' : mode;
+  doc.save(`nettrack_devices_${label}_${_timestamp()}.pdf`);
+  showToast(`PDF downloaded (${rows.length} devices)`);
+}
+
+// ── Audit log CSV export ──────────────────────────────────────────────────────
+function exportAuditCSV() {
+  const hdrs = ['Time','User ID','Action','Resource','Resource ID','Detail'];
+  const lines = [hdrs.join(',')];
+  auditLogs.forEach(l => lines.push([
+    _csvEscape(l.created_at ? new Date(l.created_at).toLocaleString() : ''),
+    _csvEscape(l.user_id),
+    _csvEscape(l.action),
+    _csvEscape(l.resource + (l.resource_id ? ` #${l.resource_id}` : '')),
+    _csvEscape(l.resource_id),
+    _csvEscape(l.detail),
+  ].join(',')));
+  _csvDownload(lines, `nettrack_audit_${_timestamp()}.csv`);
+  showToast(`Audit log CSV downloaded (${auditLogs.length} entries)`);
+}
+
+// ── Audit log PDF export ──────────────────────────────────────────────────────
+function exportAuditPDF() {
+  const { jsPDF } = window.jspdf;
+  if (!jsPDF) { showToast('PDF library not loaded'); return; }
+
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+  const ts  = new Date().toLocaleString();
+
+  doc.setFillColor(26, 26, 24);
+  doc.rect(0, 0, 297, 18, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(13);
+  doc.setFont('helvetica', 'bold');
+  doc.text('NetTrack', 10, 12);
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+  doc.text('Audit log', 50, 12);
+  doc.text(`Generated: ${ts}`, 297 - 10, 12, { align: 'right' });
+  doc.setTextColor(0, 0, 0);
+
+  const actionColor = a =>
+    a.startsWith('create') ? [59,109,17]  :
+    a.startsWith('update') ? [24,95,165]  :
+    a.startsWith('delete') ? [163,45,45]  : [107,107,103];
+
+  doc.autoTable({
+    startY: 24,
+    head: [['Time','User ID','Action','Resource','Detail']],
+    body: auditLogs.map(l => [
+      l.created_at ? new Date(l.created_at).toLocaleString() : '—',
+      l.user_id || '—',
+      l.action,
+      l.resource + (l.resource_id ? ` #${l.resource_id}` : ''),
+      l.detail || '—',
+    ]),
+    theme: 'grid',
+    styles: { fontSize: 8, cellPadding: 1.5, overflow: 'ellipsize' },
+    headStyles: { fillColor: [26,26,24], textColor: 255, fontStyle: 'bold', fontSize: 7.5 },
+    columnStyles: { 0:{cellWidth:38}, 1:{cellWidth:18}, 2:{cellWidth:24}, 3:{cellWidth:36}, 4:{cellWidth:'auto'} },
+    didParseCell: data => {
+      if (data.section === 'body' && data.column.index === 2) {
+        const [r,g,b] = actionColor(String(data.cell.raw));
+        data.cell.styles.textColor = [r,g,b];
+        data.cell.styles.fontStyle = 'bold';
+      }
+    },
+    margin: { left: 10, right: 10 },
+  });
+
+  const pages = doc.internal.getNumberOfPages();
+  doc.setFontSize(8);
+  doc.setTextColor(150);
+  for (let i = 1; i <= pages; i++) {
+    doc.setPage(i);
+    doc.text(`Page ${i} of ${pages}`, 297 - 10, 205, { align: 'right' });
+  }
+
+  doc.save(`nettrack_audit_${_timestamp()}.pdf`);
+  showToast(`Audit log PDF downloaded (${auditLogs.length} entries)`);
+}
+
+// ── Schedule & alerts ────────────────────────────────────────────────────────
+let scheduleData    = null;
+let alertDirty      = false;
+let countdownTimer  = null;
+
+async function loadSchedule() {
+  if (!currentUser || currentUser.role !== 'admin') return;
+  const res = await apiFetch('/api/scan/schedule');
+  if (!res || !res.ok) return;
+  scheduleData = await res.json();
+
+  // Show schedule panel
+  document.querySelectorAll('#schedule-panel').forEach(el => el.style.display = 'grid');
+
+  // Preset buttons
+  const presets = scheduleData.presets || {};
+  document.getElementById('preset-buttons').innerHTML = Object.entries(presets)
+    .map(([key, label]) =>
+      `<button class="preset-btn${scheduleData.preset === key ? ' active' : ''}"
+               onclick="selectPreset('${key}')">${label}</button>`
+    ).join('');
+
+  // Toggle
+  document.getElementById('sched-enabled').checked = scheduleData.enabled;
+
+  // Stats
+  document.getElementById('last-run-val').textContent =
+    scheduleData.last_run_at ? new Date(scheduleData.last_run_at).toLocaleString() : 'Never';
+  document.getElementById('last-run-status').innerHTML = scheduleData.last_run_status
+    ? `<span class="status-${scheduleData.last_run_status}">${scheduleData.last_run_status}</span>`
+    : '—';
+  document.getElementById('last-run-counts').textContent = scheduleData.last_run_found != null
+    ? `${scheduleData.last_run_found} / ${scheduleData.last_run_new} / ${scheduleData.last_run_offline}`
+    : '—';
+
+  // Start countdown to next run
+  startCountdown(scheduleData.next_run_at);
+  await loadAlertConfig();
+}
+
+function selectPreset(key) {
+  if (!scheduleData) return;
+  scheduleData.preset = key;
+  document.querySelectorAll('.preset-btn').forEach(b =>
+    b.classList.toggle('active', b.textContent === (scheduleData.presets[key] || key))
+  );
+  // Re-render preset buttons cleanly
+  const presets = scheduleData.presets || {};
+  document.getElementById('preset-buttons').innerHTML = Object.entries(presets)
+    .map(([k, label]) =>
+      `<button class="preset-btn${scheduleData.preset === k ? ' active' : ''}"
+               onclick="selectPreset('${k}')">${label}</button>`
+    ).join('');
+  saveSchedule();
+}
+
+async function saveSchedule() {
+  const enabled = document.getElementById('sched-enabled').checked;
+  const preset  = scheduleData ? scheduleData.preset : 'every_4h';
+  const res = await apiFetch('/api/scan/schedule', {
+    method: 'PUT',
+    body: JSON.stringify({ enabled, preset }),
+  });
+  if (!res || !res.ok) { showToast('Failed to save schedule'); return; }
+  scheduleData = await res.json();
+  startCountdown(scheduleData.next_run_at);
+  showToast(enabled ? `Auto-scan enabled (${scheduleData.preset_label})` : 'Auto-scan disabled');
+}
+
+function startCountdown(nextRunAt) {
+  clearInterval(countdownTimer);
+  const el = document.getElementById('next-run-val');
+  if (!nextRunAt || !document.getElementById('sched-enabled').checked) {
+    el.textContent = '—';
+    return;
+  }
+  const target = new Date(nextRunAt).getTime();
+  function tick() {
+    const diff = Math.max(0, target - Date.now());
+    const h = Math.floor(diff / 3600000);
+    const m = Math.floor((diff % 3600000) / 60000);
+    const s = Math.floor((diff % 60000) / 1000);
+    el.textContent = diff > 0
+      ? `${h}h ${String(m).padStart(2,'0')}m ${String(s).padStart(2,'0')}s`
+      : 'Now';
+  }
+  tick();
+  countdownTimer = setInterval(tick, 1000);
+}
+
+async function loadAlertConfig() {
+  const res = await apiFetch('/api/scan/schedule/alerts');
+  if (!res || !res.ok) return;
+  const cfg = await res.json();
+  document.getElementById('al-enabled').checked  = cfg.enabled;
+  document.getElementById('al-host').value        = cfg.smtp_host    || '';
+  document.getElementById('al-port').value        = cfg.smtp_port    || 587;
+  document.getElementById('al-tls').value         = cfg.smtp_use_tls ? 'true' : 'false';
+  document.getElementById('al-user').value        = cfg.smtp_username || '';
+  document.getElementById('al-from').value        = cfg.from_address  || '';
+  document.getElementById('al-to').value          = cfg.recipients    || '';
+  document.getElementById('al-complete').checked  = cfg.alert_on_complete;
+  document.getElementById('al-new').checked       = cfg.alert_on_new_device;
+  document.getElementById('al-offline').checked   = cfg.alert_on_offline;
+  alertDirty = false;
+}
+
+async function saveAlerts() {
+  const btn = document.getElementById('al-save-btn');
+  btn.textContent = 'Saving...'; btn.disabled = true;
+  const payload = {
+    enabled:             document.getElementById('al-enabled').checked,
+    smtp_host:           document.getElementById('al-host').value.trim() || null,
+    smtp_port:           parseInt(document.getElementById('al-port').value) || 587,
+    smtp_use_tls:        document.getElementById('al-tls').value === 'true',
+    smtp_username:       document.getElementById('al-user').value.trim() || null,
+    smtp_password:       document.getElementById('al-pass').value || null,
+    from_address:        document.getElementById('al-from').value.trim() || null,
+    recipients:          document.getElementById('al-to').value.trim() || null,
+    alert_on_complete:   document.getElementById('al-complete').checked,
+    alert_on_new_device: document.getElementById('al-new').checked,
+    alert_on_offline:    document.getElementById('al-offline').checked,
+  };
+  const res = await apiFetch('/api/scan/schedule/alerts', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+  btn.textContent = 'Save'; btn.disabled = false;
+  if (!res || !res.ok) { showToast('Failed to save alert config'); return; }
+  alertDirty = false;
+  document.getElementById('al-pass').value = '';   // clear password field after save
+  showToast('Alert settings saved');
+}
+
+async function testAlert() {
+  const res = await apiFetch('/api/scan/schedule/alerts/test', { method: 'POST' });
+  if (!res || !res.ok) {
+    const err = await res?.json().catch(() => ({}));
+    showToast(err?.detail || 'Test email failed — check SMTP settings');
+  } else {
+    showToast('Test email sent ✓');
+  }
+}
+
+// ── Scan status / admin banner ────────────────────────────────────────────────
+async function loadScanStatus() {
+  const res = await apiFetch('/api/scan/status');
+  if (!res || !res.ok) return;
+  const data = await res.json();
+  const banner = document.getElementById('system-banner');
+  const text   = document.getElementById('system-banner-text');
+  if (data.ping_warning) {
+    text.textContent = data.ping_warning;
+    banner.style.display = 'flex';
+  } else {
+    banner.style.display = 'none';
+  }
+}
+
+// ── Login enter key ───────────────────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && document.getElementById('login-screen').style.display !== 'none') doLogin();
+});
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+// Try to restore session via HttpOnly cookie. If valid, go straight into app.
+// If not, showLoginScreen() is called inside initApp() and login is shown.
+(async () => {
+  await initApp();
+})();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+</body>
+</html>

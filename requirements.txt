@@ -1,0 +1,36 @@
+# NetTrack Python dependencies
+#
+# On Fedora 43 — use setup_fedora43.sh which handles dnf vs pip automatically.
+# On RHEL / other — pip install -r requirements.txt (venv recommended).
+#
+# Packages marked [dnf] are available via: dnf install python3-<name>
+# and are pre-installed by setup_fedora43.sh. You can skip them if using dnf.
+
+# [dnf] python3-sqlalchemy
+sqlalchemy==2.0.30
+
+# [dnf] python3-psycopg2
+psycopg2-binary==2.9.9
+
+# [dnf] python3-pyyaml
+pyyaml==6.0.1
+
+# [dnf] python3-requests
+requests==2.31.0
+
+# [dnf] python3-httpx
+httpx==0.27.0
+
+# pip only — not packaged in Fedora 43
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+pydantic==2.7.1
+python-dotenv==1.0.1
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-multipart==0.0.9
+slowapi==0.1.9
+pysnmp==6.1.4
+apscheduler==3.10.4
+alembic==1.13.1
+cryptography==42.0.5
