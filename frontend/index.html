@@ -224,9 +224,18 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
         Devices
       </button>
-      <button class="nav-item" onclick="showPage('topology')" id="nav-topology">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M12 7v4M12 11l-5 6M12 11l5 6"/></svg>
-        By switch
+      <button class="nav-item" onclick="showPage('switches')" id="nav-switches">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="10" rx="2"/><path d="M6 11h.01M6 13h.01M10 11h8M10 13h4"/></svg>
+        Switches
+      </button>
+      <div class="nav-section modify-only" style="display:none;">Configuration</div>
+      <button class="nav-item modify-only" style="display:none;" onclick="showPage('floors')" id="nav-floors">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        Floors
+      </button>
+      <button class="nav-item modify-only" style="display:none;" onclick="showPage('vlans')" id="nav-vlans">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="4" rx="1"/><rect x="2" y="10" width="20" height="4" rx="1"/><rect x="2" y="17" width="20" height="4" rx="1"/></svg>
+        VLANs
       </button>
       <button class="nav-item" onclick="showPage('scan')" id="nav-scan">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
@@ -330,10 +339,45 @@
       </div>
     </div>
 
-    <!-- By switch -->
-    <div id="page-topology" style="display:none;">
-      <div class="page-header"><div class="page-title">By switch</div></div>
-      <div id="topology-content"></div>
+    <!-- Switches -->
+    <div id="page-switches" style="display:none;">
+      <div class="page-header">
+        <div><div class="page-title">Switches</div></div>
+        <button class="btn primary modify-only" style="display:none;" onclick="openAddSwitch()">+ Add switch</button>
+      </div>
+      <div id="switches-content"></div>
+    </div>
+
+    <!-- Floors -->
+    <div id="page-floors" style="display:none;">
+      <div class="page-header">
+        <div><div class="page-title">Floors</div></div>
+        <button class="btn primary" onclick="openAddFloor()">+ Add floor</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Name</th><th>Building</th><th>Sort order</th><th></th></tr></thead>
+          <tbody id="floors-body"></tbody>
+        </table>
+        <div id="floors-empty" class="empty" style="display:none;">No floors defined yet. Add one to get started.</div>
+        <div id="floors-loading" class="empty">Loading...</div>
+      </div>
+    </div>
+
+    <!-- VLANs -->
+    <div id="page-vlans" style="display:none;">
+      <div class="page-header">
+        <div><div class="page-title">VLANs</div></div>
+        <button class="btn primary" onclick="openAddVlan()">+ Add VLAN</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>VLAN ID</th><th>Name</th><th>Description</th><th></th></tr></thead>
+          <tbody id="vlans-body"></tbody>
+        </table>
+        <div id="vlans-empty" class="empty" style="display:none;">No VLANs defined yet. Add one to get started.</div>
+        <div id="vlans-loading" class="empty">Loading...</div>
+      </div>
     </div>
 
     <!-- Scan -->
@@ -571,6 +615,7 @@ async function initApp() {
   // Tags toggle
   document.querySelectorAll('.tag').forEach(t => t.addEventListener('click', () => t.classList.toggle('active')));
 
+  await loadReferenceData();
   await loadDevices();
   showPage('devices');
 }
@@ -583,6 +628,7 @@ async function loadDevices() {
   document.getElementById('table-loading').style.display = 'none';
   if (!res || !res.ok) { showToast('Failed to load devices'); return; }
   devices = await res.json();
+  window.devices = devices;   // expose for switches page
   populateFilters();
   renderMetrics();
   renderTable();
@@ -660,11 +706,14 @@ function renderMetrics() {
 }
 
 function populateFilters() {
-  const switches = [...new Set(devices.map(d => d.switch).filter(Boolean))].sort();
-  const floors   = [...new Set(devices.map(d => d.floor).filter(Boolean))].sort((a, b) => {
-    const order = v => v === 'B2' ? -2 : v === 'B1' ? -1 : v === 'G' ? 0 : parseInt(v) || 99;
-    return order(a) - order(b);
-  });
+  // Use reference data if available, fall back to deriving from devices
+  const switches = allSwitches.length
+    ? allSwitches.map(s => s.name)
+    : [...new Set(devices.map(d => d.switch).filter(Boolean))].sort();
+  const floors = allFloors.length
+    ? allFloors.map(f => f.name)
+    : [...new Set(devices.map(d => d.floor).filter(Boolean))].sort();
+
   document.getElementById('filter-switch').innerHTML =
     '<option value="">All switches</option>' + switches.map(s => `<option>${s}</option>`).join('');
   document.getElementById('filter-floor').innerHTML =
@@ -714,8 +763,21 @@ function openEditDevice(id) {
 
 function showDeviceForm(d) {
   const title  = editingDeviceId ? 'Edit device' : 'Add device';
-  const floors = ['B2','B1','G','1','2','3','4','5','6','7','8','9','10'];
   const types  = ['Camera','Access Control','Intercom','Switch','WAP','Server','Printer','Other'];
+
+  // Build dynamic dropdowns from reference data
+  const floorOpts = allFloors.length
+    ? allFloors.map(f => `<option value="${f.name}" ${d.floor===f.name?'selected':''}>${f.name}${f.building?' — '+f.building:''}</option>`).join('')
+    : `<option value="${d.floor||''}">${d.floor||'No floors defined'}</option>`;
+
+  const vlanOpts = allVlans.length
+    ? allVlans.map(v => `<option value="${v.vlan_id}" ${d.vlan==v.vlan_id?'selected':''}>${v.vlan_id}${v.name?' — '+v.name:''}</option>`).join('')
+    : `<option value="${d.vlan||''}">${d.vlan||'No VLANs defined'}</option>`;
+
+  const switchOpts = allSwitches.length
+    ? allSwitches.map(s => `<option value="${s.name}" ${d.switch===s.name?'selected':''}>${s.name}${s.ip?' ('+s.ip+')':''}</option>`).join('')
+    : `<option value="${d.switch||''}">${d.switch||'No switches defined'}</option>`;
+
   setModal(`
     <div class="modal-header"><div class="modal-title">${title}</div><button class="close-btn" onclick="closeModal()">×</button></div>
     <div class="field-row">
@@ -727,15 +789,15 @@ function showDeviceForm(d) {
       <div class="field"><label>Type</label><select id="f-type">${types.map(t=>`<option${d.type===t?' selected':''}>${t}</option>`).join('')}</select></div>
     </div>
     <div class="field-row">
-      <div class="field"><label>Floor</label><select id="f-floor">${floors.map(f=>`<option${d.floor===f?' selected':''}>${f}</option>`).join('')}</select></div>
+      <div class="field"><label>Floor</label><select id="f-floor"><option value="">— None —</option>${floorOpts}</select></div>
       <div class="field"><label>Location</label><input id="f-location" value="${d.location||''}"/></div>
     </div>
     <div class="field-row">
       <div class="field"><label>Status</label><select id="f-status">${['Online','Offline','Unknown'].map(s=>`<option${d.status===s?' selected':''}>${s}</option>`).join('')}</select></div>
-      <div class="field"><label>VLAN</label><input id="f-vlan" type="number" value="${d.vlan||''}"/></div>
+      <div class="field"><label>VLAN</label><select id="f-vlan"><option value="">— None —</option>${vlanOpts}</select></div>
     </div>
     <div class="field-row">
-      <div class="field"><label>Switch</label><input id="f-switch" value="${d.switch||''}"/></div>
+      <div class="field"><label>Switch</label><select id="f-switch"><option value="">— None —</option>${switchOpts}</select></div>
       <div class="field"><label>Port</label><input id="f-port" value="${d.port||''}"/></div>
     </div>
     <div class="field"><label>Notes</label><textarea id="f-notes">${d.notes||''}</textarea></div>
@@ -755,7 +817,7 @@ async function saveDevice() {
     floor:    document.getElementById('f-floor').value,
     location: document.getElementById('f-location').value.trim(),
     vlan:     parseInt(document.getElementById('f-vlan').value) || null,
-    switch:   document.getElementById('f-switch').value.trim(),
+    switch:   document.getElementById('f-switch').value || null,
     port:     document.getElementById('f-port').value.trim(),
     notes:    document.getElementById('f-notes').value.trim(),
   };
@@ -1026,14 +1088,16 @@ async function loadAuditLog() {
 }
 
 // ── Page routing ──────────────────────────────────────────────────────────────
-const pages = ['devices','topology','scan','charts','users','audit'];
+const pages = ['devices','switches','scan','charts','users','audit','floors','vlans'];
 function showPage(name) {
   pages.forEach(p => {
     document.getElementById(`page-${p}`).style.display   = p === name ? '' : 'none';
     const nav = document.getElementById(`nav-${p}`);
     if (nav) nav.classList.toggle('active', p === name);
   });
-  if (name === 'topology')  renderTopology();
+  if (name === 'switches')  loadSwitches();
+  if (name === 'floors')    loadFloors();
+  if (name === 'vlans')     loadVlans();
   if (name === 'charts')    renderCharts();
   if (name === 'users')     loadUsers();
   if (name === 'audit')     loadAuditLog();
@@ -1439,6 +1503,282 @@ async function testAlert() {
   } else {
     showToast('Test email sent ✓');
   }
+}
+
+// ── Global reference data ────────────────────────────────────────────────────
+let allFloors   = [];
+let allVlans    = [];
+let allSwitches = [];
+
+async function loadReferenceData() {
+  const [fr, vr, sr] = await Promise.all([
+    apiFetch('/api/floors'),
+    apiFetch('/api/vlans'),
+    apiFetch('/api/switches'),
+  ]);
+  if (fr && fr.ok) allFloors   = await fr.json();
+  if (vr && vr.ok) allVlans    = await vr.json();
+  if (sr && sr.ok) allSwitches = await sr.json();
+  populateFilters();
+}
+
+// ── Switches page ─────────────────────────────────────────────────────────────
+let editingSwitchId = null;
+
+async function loadSwitches() {
+  const res = await apiFetch('/api/switches');
+  if (!res || !res.ok) return;
+  allSwitches = await res.json();
+  const el = document.getElementById('switches-content');
+  if (!allSwitches.length) {
+    el.innerHTML = '<div class="empty">No switches defined yet.</div>';
+    return;
+  }
+  const canEdit = currentUser && (currentUser.role === 'modify' || currentUser.role === 'admin');
+  el.innerHTML = allSwitches.map(sw => {
+    const devices = allSwitches.length; // placeholder
+    const devs = window.devices ? window.devices.filter(d => d.switch === sw.name) : [];
+    return `<div class="panel" style="margin-bottom:1rem;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+        <div>
+          <div style="font-size:15px;font-weight:500;">${sw.name}</div>
+          <div style="font-size:12px;color:var(--text2);">${sw.ip || '—'} · Floor ${sw.floor || '—'} · ${sw.location || '—'} · ${sw.model || '—'}</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <span style="font-size:12px;color:var(--text2);">${devs.length} device${devs.length !== 1 ? 's' : ''}</span>
+          ${canEdit ? `<button class="btn btn-sm" onclick="openEditSwitch(${sw.id})">Edit</button>` : ''}
+        </div>
+      </div>
+      <table><thead><tr><th>Port</th><th>Hostname</th><th>IP</th><th>Type</th><th>Status</th><th>Floor</th><th>VLAN</th></tr></thead>
+      <tbody>${devs.sort((a,b)=>(a.port||'').localeCompare(b.port||'')).map(d=>`<tr>
+        <td class="mono">${d.port||'—'}</td>
+        <td><strong style="font-weight:500;">${d.hostname||'—'}</strong></td>
+        <td class="mono">${d.ip||'—'}</td>
+        <td><span class="badge badge-type">${d.type||'—'}</span></td>
+        <td>${statusBadge(d.status||'Unknown')}</td>
+        <td style="font-size:12px;">${d.floor||'—'}</td>
+        <td style="font-size:12px;color:var(--text2);">${d.vlan||'—'}</td>
+      </tr>`).join('')}</tbody></table>
+    </div>`;
+  }).join('');
+}
+
+function openAddSwitch() {
+  editingSwitchId = null;
+  showSwitchForm({});
+}
+
+async function openEditSwitch(id) {
+  editingSwitchId = id;
+  const sw = allSwitches.find(s => s.id === id) || {};
+  showSwitchForm(sw);
+}
+
+function showSwitchForm(sw) {
+  const title = editingSwitchId ? 'Edit switch' : 'Add switch';
+  const floorOpts = allFloors.map(f =>
+    `<option value="${f.name}" ${sw.floor === f.name ? 'selected' : ''}>${f.name}${f.building ? ' — ' + f.building : ''}</option>`
+  ).join('');
+  setModal(`
+    <div class="modal-header"><div class="modal-title">${title}</div><button class="close-btn" onclick="closeModal()">×</button></div>
+    <div class="field-row">
+      <div class="field"><label>Name</label><input id="sw-name" value="${sw.name||''}"/></div>
+      <div class="field"><label>IP address</label><input id="sw-ip" value="${sw.ip||''}"/></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Floor</label><select id="sw-floor"><option value="">— None —</option>${floorOpts}</select></div>
+      <div class="field"><label>Location</label><input id="sw-location" value="${sw.location||''}"/></div>
+    </div>
+    <div class="field"><label>Model</label><input id="sw-model" value="${sw.model||''}"/></div>
+    <div class="field"><label>Notes</label><textarea id="sw-notes">${sw.notes||''}</textarea></div>
+    <div style="display:flex;gap:8px;margin-top:4px;">
+      <button class="btn primary" onclick="saveSwitch()">Save</button>
+      ${editingSwitchId ? `<button class="btn danger" onclick="deleteSwitch(${editingSwitchId})">Delete</button>` : ''}
+      <button class="btn" onclick="closeModal()">Cancel</button>
+    </div>`);
+}
+
+async function saveSwitch() {
+  const data = {
+    name:     document.getElementById('sw-name').value.trim(),
+    ip:       document.getElementById('sw-ip').value.trim() || null,
+    floor:    document.getElementById('sw-floor').value || null,
+    location: document.getElementById('sw-location').value.trim() || null,
+    model:    document.getElementById('sw-model').value.trim() || null,
+    notes:    document.getElementById('sw-notes').value.trim() || '',
+  };
+  const method = editingSwitchId ? 'PUT' : 'POST';
+  const url    = editingSwitchId ? `/api/switches/${editingSwitchId}` : '/api/switches';
+  const res    = await apiFetch(url, { method, body: JSON.stringify(data) });
+  if (!res || !res.ok) { showToast('Save failed'); return; }
+  closeModal();
+  showToast(editingSwitchId ? 'Switch updated' : 'Switch added');
+  await loadReferenceData();
+  loadSwitches();
+}
+
+async function deleteSwitch(id) {
+  if (!confirm('Delete this switch? Devices assigned to it will lose their switch reference.')) return;
+  const res = await apiFetch(`/api/switches/${id}`, { method: 'DELETE' });
+  if (!res || !res.ok) { showToast('Delete failed'); return; }
+  closeModal();
+  showToast('Switch deleted');
+  await loadReferenceData();
+  loadSwitches();
+}
+
+// ── Floors page ───────────────────────────────────────────────────────────────
+let editingFloorId = null;
+
+async function loadFloors() {
+  document.getElementById('floors-loading').style.display = '';
+  const res = await apiFetch('/api/floors');
+  document.getElementById('floors-loading').style.display = 'none';
+  if (!res || !res.ok) return;
+  allFloors = await res.json();
+  const empty = document.getElementById('floors-empty');
+  const tbody = document.getElementById('floors-body');
+  if (!allFloors.length) { empty.style.display = ''; tbody.innerHTML = ''; return; }
+  empty.style.display = 'none';
+  tbody.innerHTML = allFloors.map(f => `<tr>
+    <td><strong style="font-weight:500;">${f.name}</strong></td>
+    <td style="color:var(--text2);font-size:13px;">${f.building || '—'}</td>
+    <td style="color:var(--text2);font-size:13px;">${f.sort_order}</td>
+    <td style="white-space:nowrap;">
+      <button class="btn btn-sm" onclick="openEditFloor(${f.id})">Edit</button>
+      <button class="btn btn-sm danger" style="margin-left:4px;" onclick="deleteFloor(${f.id})">Delete</button>
+    </td>
+  </tr>`).join('');
+}
+
+function openAddFloor() {
+  editingFloorId = null;
+  showFloorForm({});
+}
+
+function openEditFloor(id) {
+  editingFloorId = id;
+  showFloorForm(allFloors.find(f => f.id === id) || {});
+}
+
+function showFloorForm(f) {
+  const title = editingFloorId ? 'Edit floor' : 'Add floor';
+  setModal(`
+    <div class="modal-header"><div class="modal-title">${title}</div><button class="close-btn" onclick="closeModal()">×</button></div>
+    <div class="field-row">
+      <div class="field"><label>Name</label><input id="fl-name" value="${f.name||''}" placeholder="e.g. Ground, Floor 1, Basement"/></div>
+      <div class="field"><label>Building</label><input id="fl-building" value="${f.building||''}" placeholder="e.g. Main Building"/></div>
+    </div>
+    <div class="field"><label>Sort order</label><input id="fl-sort" type="number" value="${f.sort_order ?? 0}" style="width:100px;"/></div>
+    <div style="display:flex;gap:8px;margin-top:12px;">
+      <button class="btn primary" onclick="saveFloor()">Save</button>
+      <button class="btn" onclick="closeModal()">Cancel</button>
+    </div>`);
+}
+
+async function saveFloor() {
+  const data = {
+    name:       document.getElementById('fl-name').value.trim(),
+    building:   document.getElementById('fl-building').value.trim() || null,
+    sort_order: parseInt(document.getElementById('fl-sort').value) || 0,
+  };
+  if (!data.name) { showToast('Floor name is required'); return; }
+  const method = editingFloorId ? 'PUT' : 'POST';
+  const url    = editingFloorId ? `/api/floors/${editingFloorId}` : '/api/floors';
+  const res    = await apiFetch(url, { method, body: JSON.stringify(data) });
+  if (!res || !res.ok) { showToast('Save failed'); return; }
+  closeModal();
+  showToast(editingFloorId ? 'Floor updated' : 'Floor added');
+  await loadReferenceData();
+  loadFloors();
+}
+
+async function deleteFloor(id) {
+  if (!confirm('Delete this floor? Devices on this floor will lose their floor assignment.')) return;
+  const res = await apiFetch(`/api/floors/${id}`, { method: 'DELETE' });
+  if (!res || !res.ok) { showToast('Delete failed'); return; }
+  showToast('Floor deleted');
+  await loadReferenceData();
+  loadFloors();
+}
+
+// ── VLANs page ────────────────────────────────────────────────────────────────
+let editingVlanId = null;
+
+async function loadVlans() {
+  document.getElementById('vlans-loading').style.display = '';
+  const res = await apiFetch('/api/vlans');
+  document.getElementById('vlans-loading').style.display = 'none';
+  if (!res || !res.ok) return;
+  allVlans = await res.json();
+  const empty = document.getElementById('vlans-empty');
+  const tbody = document.getElementById('vlans-body');
+  if (!allVlans.length) { empty.style.display = ''; tbody.innerHTML = ''; return; }
+  empty.style.display = 'none';
+  tbody.innerHTML = allVlans.map(v => `<tr>
+    <td><strong style="font-weight:500;font-family:monospace;">${v.vlan_id}</strong></td>
+    <td>${v.name || '—'}</td>
+    <td style="color:var(--text2);font-size:13px;">${v.description || '—'}</td>
+    <td style="white-space:nowrap;">
+      <button class="btn btn-sm" onclick="openEditVlan(${v.id})">Edit</button>
+      <button class="btn btn-sm danger" style="margin-left:4px;" onclick="deleteVlan(${v.id})">Delete</button>
+    </td>
+  </tr>`).join('');
+}
+
+function openAddVlan() {
+  editingVlanId = null;
+  showVlanForm({});
+}
+
+function openEditVlan(id) {
+  editingVlanId = id;
+  showVlanForm(allVlans.find(v => v.id === id) || {});
+}
+
+function showVlanForm(v) {
+  const title = editingVlanId ? 'Edit VLAN' : 'Add VLAN';
+  setModal(`
+    <div class="modal-header"><div class="modal-title">${title}</div><button class="close-btn" onclick="closeModal()">×</button></div>
+    <div class="field-row">
+      <div class="field"><label>VLAN ID</label><input id="vl-id" type="number" min="1" max="4094" value="${v.vlan_id||''}" placeholder="e.g. 10"/></div>
+      <div class="field"><label>Name</label><input id="vl-name" value="${v.name||''}" placeholder="e.g. Management"/></div>
+    </div>
+    <div class="field"><label>Description</label><input id="vl-desc" value="${v.description||''}" placeholder="Optional description"/></div>
+    <div style="display:flex;gap:8px;margin-top:12px;">
+      <button class="btn primary" onclick="saveVlan()">Save</button>
+      <button class="btn" onclick="closeModal()">Cancel</button>
+    </div>`);
+}
+
+async function saveVlan() {
+  const vlanId = parseInt(document.getElementById('vl-id').value);
+  if (!vlanId || vlanId < 1 || vlanId > 4094) { showToast('VLAN ID must be between 1 and 4094'); return; }
+  const data = {
+    vlan_id:     vlanId,
+    name:        document.getElementById('vl-name').value.trim() || null,
+    description: document.getElementById('vl-desc').value.trim() || null,
+  };
+  const method = editingVlanId ? 'PUT' : 'POST';
+  const url    = editingVlanId ? `/api/vlans/${editingVlanId}` : '/api/vlans';
+  const res    = await apiFetch(url, { method, body: JSON.stringify(data) });
+  if (!res || !res.ok) {
+    const err = await res?.json().catch(() => ({}));
+    showToast(err?.detail || 'Save failed'); return;
+  }
+  closeModal();
+  showToast(editingVlanId ? 'VLAN updated' : 'VLAN added');
+  await loadReferenceData();
+  loadVlans();
+}
+
+async function deleteVlan(id) {
+  if (!confirm('Delete this VLAN?')) return;
+  const res = await apiFetch(`/api/vlans/${id}`, { method: 'DELETE' });
+  if (!res || !res.ok) { showToast('Delete failed'); return; }
+  showToast('VLAN deleted');
+  await loadReferenceData();
+  loadVlans();
 }
 
 // ── Scan status / admin banner ────────────────────────────────────────────────

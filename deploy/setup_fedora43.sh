@@ -38,7 +38,7 @@ fi
 
 # ── 2. System packages via DNF5 ───────────────────────────────────────────────
 info "Installing system packages..."
-dnf install -y \
+dnf install -y --skip-unavailable \
     python3 python3-pip python3-devel \
     postgresql postgresql-server postgresql-devel \
     python3-sqlalchemy \
@@ -49,7 +49,6 @@ dnf install -y \
     python3-cryptography \
     python3-bcrypt \
     python3-pydantic \
-    python3-jose \
     gcc \
     nginx \
     nmap \
@@ -101,7 +100,9 @@ $PIP \
     "slowapi==0.1.9" \
     "pysnmp==6.1.4" \
     "apscheduler==3.10.4" \
-    "alembic==1.13.1"
+    "alembic==1.13.1" \
+    "python-jose==3.3.0" \
+    "passlib[bcrypt]==1.7.4"
 
 # Verify uvicorn is reachable
 sudo -u "${APP_USER}" /home/nettrack/.local/bin/uvicorn --version \

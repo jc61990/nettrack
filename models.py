@@ -99,3 +99,23 @@ class AlertConfig(Base):
     alert_on_new_device = Column(Boolean, default=True)
     alert_on_offline    = Column(Boolean, default=True)
     updated_at          = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class Floor(Base):
+    __tablename__ = "floors"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    name       = Column(String(64), nullable=False)
+    building   = Column(String(128), nullable=True)
+    sort_order = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class Vlan(Base):
+    __tablename__ = "vlans"
+
+    id          = Column(Integer, primary_key=True, index=True)
+    vlan_id     = Column(Integer, nullable=False, unique=True, index=True)
+    name        = Column(String(64), nullable=True)
+    description = Column(Text, nullable=True)
+    created_at  = Column(DateTime(timezone=True), server_default=func.now())
