@@ -101,7 +101,8 @@ $PIP \
     "pysnmp==6.1.4" \
     "apscheduler==3.10.4" \
     "alembic==1.13.1" \
-    "python-jose==3.3.0"
+    "python-jose==3.3.0" \
+    "passlib[bcrypt]==1.7.4"
 
 # Verify uvicorn is reachable
 sudo -u "${APP_USER}" /home/nettrack/.local/bin/uvicorn --version \
