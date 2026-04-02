@@ -155,8 +155,8 @@ async def sso_callback(code: str, state: str, db: Session = Depends(get_db)):
         key="access_token",
         value=access_token,
         httponly=True,
-        secure=True,
-        samesite="strict",
+        secure=False,
+        samesite="lax",
         max_age=60 * auth.ACCESS_EXPIRE,
         path="/",
     )
@@ -164,8 +164,8 @@ async def sso_callback(code: str, state: str, db: Session = Depends(get_db)):
         key="refresh_token",
         value=refresh_token,
         httponly=True,
-        secure=True,
-        samesite="strict",
+        secure=False,
+        samesite="lax",
         max_age=60 * 60 * 24 * auth.REFRESH_EXPIRE,
         path="/api/auth/refresh",
     )

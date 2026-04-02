@@ -55,8 +55,8 @@ def login(
         key="refresh_token",
         value=refresh_token,
         httponly=True,
-        secure=True,         # HTTPS only
-        samesite="strict",
+        secure=False,         # HTTPS only
+        samesite="lax",
         max_age=60 * 60 * 24 * auth.REFRESH_EXPIRE,
         path="/api/auth/refresh",
     )
@@ -92,7 +92,7 @@ def refresh(request: Request, db: Session = Depends(get_db)):
     response = JSONResponse(content={"access_token": access_token, "token_type": "bearer"})
     response.set_cookie(
         key="refresh_token", value=new_refresh,
-        httponly=True, secure=True, samesite="strict",
+        httponly=True, secure=False, samesite="lax",
         max_age=60 * 60 * 24 * auth.REFRESH_EXPIRE,
         path="/api/auth/refresh",
     )

@@ -462,6 +462,7 @@ let _refreshing = null;   // deduplicate concurrent refresh attempts
 
 async function apiFetch(path, options = {}) {
   const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+  if (window._accessToken) headers['Authorization'] = 'Bearer ' + window._accessToken;
   let res = await fetch(API + path, { ...options, headers, credentials: 'include' });
 
   if (res.status === 401) {
@@ -507,6 +508,8 @@ async function doLogin() {
       err.textContent = data.detail || 'Login failed';
       err.style.display = '';
     } else {
+      const data = await res.json().catch(() => ({}));
+      if (data.access_token) window._accessToken = data.access_token;
       await initApp();
     }
   } catch(e) {
