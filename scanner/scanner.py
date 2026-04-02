@@ -1,227 +1,503 @@
 """
-Scanner API router.
+NetTrack network scanner — core discovery engine.
 
-POST /api/scan/trigger   — start a scan (streams live output via SSE)
-GET  /api/scan/status    — last scan summary
-GET  /api/scan/results   — list saved result files
+Discovery pipeline per subnet:
+  1. Ping sweep (concurrent ICMP)        → live hosts
+  2. ARP table collection (from switches) → MAC → IP mapping
+  3. SNMP queries on live hosts           → sysDescr, sysName
+  4. LLDP neighbor walk on switches       → port-level topology
+  5. MAC bridge table walk on switches    → non-LLDP devices
+  6. OUI lookup                           → vendor from MAC prefix
+  7. Merge + emit results
 """
 
 import asyncio
+import ipaddress
 import json
-import threading
-from datetime import datetime
-from typing import Optional
-
-from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
-
-import auth
-import models
-from sqlalchemy.orm import Session
-from database import get_db
-from scanner.config import load_config
-import yaml
+import logging
 import os
-from scanner.scanner import NetworkScanner, save_results, post_results, check_ping_capability
+import re
+import socket
+import subprocess
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
+from typing import Callable, Generator, Optional
 
-router = APIRouter(prefix='/api/scan', tags=['Scanner'])
+import httpx
+import requests
 
-# In-memory scan state (one scan at a time)
-_scan_lock   = threading.Lock()
-_scan_running = False
-_last_scan: dict = {}
+from scanner.config import ScannerConfig, SubnetConfig, load_config
+from scanner.lldp import get_lldp_neighbors, get_mac_port_table
+from scanner.snmp import SNMPClient
 
+log = logging.getLogger(__name__)
 
-class ScanRequest(BaseModel):
-    subnets:        Optional[list[str]] = None   # overrides config if provided
-    snmp_community: Optional[str]       = None
-    dry_run:        bool                = False   # scan but don't POST to API
+# ── OUI database (trimmed — extend or swap for a full offline DB) ─────────────
+# Full lookup: pip install manuf   →  from manuf import MacParser
+OUI_PREFIXES = {
+    '00:50:56': 'VMware',
+    '00:0C:29': 'VMware',
+    'AA:BB:CC': 'Demo Device',
+    'B8:27:EB': 'Raspberry Pi',
+    'DC:A6:32': 'Raspberry Pi',
+    '00:1A:11': 'Google',
+    'FC:EC:DA': 'Ubiquiti',
+    '24:A4:3C': 'Ubiquiti',
+    '00:18:0A': 'Cisco',
+    '00:1B:D4': 'Cisco',
+    '58:AC:78': 'Cisco',
+    'A0:EC:F9': 'Cisco',
+    '00:1E:13': 'Cisco',
+    '00:26:CB': 'Cisco',
+    'E4:AA:5D': 'HID Global',
+    '00:06:8E': 'HID Global',
+    '9C:8E:CD': 'Hikvision',
+    'C4:2F:90': 'Hikvision',
+    '00:12:17': 'Axis Communications',
+    'AC:CC:8E': 'Axis Communications',
+    '40:8D:5C': 'Dahua',
+    '70:85:C2': 'Dahua',
+    '00:17:C8': '2N Telekomunikace',
+    '70:EE:50': 'HP Enterprise',
+    '3C:D9:2B': 'HP Enterprise',
+    '10:02:B5': 'HP',
+    '00:21:5A': 'HP',
+}
 
+try:
+    from manuf import MacParser
+    _mac_parser = MacParser()
+    def oui_lookup(mac: str) -> str:
+        result = _mac_parser.get_manuf(mac)
+        return result or _oui_prefix_lookup(mac)
+except ImportError:
+    def oui_lookup(mac: str) -> str:
+        return _oui_prefix_lookup(mac)
 
-class ScanStatus(BaseModel):
-    running:      bool
-    last_scan:    Optional[dict] = None
-    ping_method:  Optional[str] = None
-    ping_warning: Optional[str] = None
-
-
-@router.get('/config')
-def get_scan_config(
-    _: models.User = Depends(auth.require_role('read_only')),
-    db: Session = Depends(get_db),
-):
-    """Return scan config from database."""
-    row = db.query(models.ScanConfig).filter(models.ScanConfig.id == 1).first()
-    if not row:
-        row = models.ScanConfig(id=1)
-        db.add(row)
-        db.commit()
-        db.refresh(row)
-    subnets = json.loads(row.subnets) if row.subnets else []
-    return {
-        'subnets':         subnets,
-        'snmp_community':  row.snmp_community or 'public',
-        'snmp_port':       row.snmp_port       or 161,
-        'snmp_timeout':    row.snmp_timeout     or 2,
-        'snmp_retries':    row.snmp_retries     or 1,
-        'ping_timeout_ms': row.ping_timeout_ms  or 800,
-        'ping_workers':    row.ping_workers      or 64,
-    }
-
-
-@router.put('/config', status_code=200)
-def save_scan_config(
-    payload: dict,
-    current_user: models.User = Depends(auth.require_role('modify')),
-    db: Session = Depends(get_db),
-):
-    """Save scan config to database — persists through deployments."""
-    row = db.query(models.ScanConfig).filter(models.ScanConfig.id == 1).first()
-    if not row:
-        row = models.ScanConfig(id=1)
-        db.add(row)
-
-    if 'subnets' in payload:
-        row.subnets = json.dumps(payload['subnets'])
-    if 'snmp_community'  in payload: row.snmp_community  = payload['snmp_community']
-    if 'snmp_port'       in payload: row.snmp_port        = int(payload['snmp_port'])
-    if 'snmp_timeout'    in payload: row.snmp_timeout     = int(payload['snmp_timeout'])
-    if 'snmp_retries'    in payload: row.snmp_retries     = int(payload['snmp_retries'])
-    if 'ping_timeout_ms' in payload: row.ping_timeout_ms  = int(payload['ping_timeout_ms'])
-    if 'ping_workers'    in payload: row.ping_workers      = int(payload['ping_workers'])
-
-    db.commit()
-    auth.log_action(db, current_user.id, "update_scan_config", "scanner", None,
-                    f"{len(payload.get('subnets', []))} subnets")
-    return {'saved': True}
+def _oui_prefix_lookup(mac: str) -> str:
+    prefix = mac.upper()[:8]
+    return OUI_PREFIXES.get(prefix, '')
 
 
-@router.post('/trigger')
-def trigger_scan(
-    request: ScanRequest,
-    current_user: models.User = Depends(auth.require_role('modify')),
-    db: Session = Depends(get_db),
-):
+# ── Device type inference ─────────────────────────────────────────────────────
+
+VENDOR_TYPE_MAP = {
+    'hikvision':  'Camera',
+    'axis':       'Camera',
+    'dahua':      'Camera',
+    'hanwha':     'Camera',
+    'bosch':      'Camera',
+    'hid':        'Access Control',
+    'lenel':      'Access Control',
+    'assa abloy': 'Access Control',
+    '2n':         'Intercom',
+    'algo':       'Intercom',
+    'cisco':      'Switch',
+    'hp enterprise': 'Switch',
+    'aruba':      'WAP',
+    'ubiquiti':   'WAP',
+    'ruckus':     'WAP',
+    'meraki':     'WAP',
+}
+
+def infer_type(vendor: str, sys_descr: str, hostname: str) -> str:
+    combined = (vendor + ' ' + sys_descr + ' ' + hostname).lower()
+    for keyword, device_type in VENDOR_TYPE_MAP.items():
+        if keyword in combined:
+            return device_type
+    if any(k in combined for k in ['switch', 'catalyst', 'nexus', 'ios']):
+        return 'Switch'
+    if any(k in combined for k in ['access point', 'wireless', ' ap ']):
+        return 'WAP'
+    if any(k in combined for k in ['printer', 'laserjet', 'officejet']):
+        return 'Printer'
+    if any(k in combined for k in ['server', 'linux', 'windows server']):
+        return 'Server'
+    return 'Other'
+
+
+# ── Ping sweep ────────────────────────────────────────────────────────────────
+
+def ping_host(ip: str, timeout_ms: int = 800) -> bool:
     """
-    Start a network scan and stream live log output as Server-Sent Events.
+    Returns True if the host is reachable.
 
-    The response is a text/event-stream where each event is:
-        data: {"level": "ok"|"warn"|"info", "msg": "..."}
-
-    Final event:
-        data: {"level": "done", "created": N, "updated": N, "saved": "/path/to/file"}
+    Tries ICMP ping first. If ping fails with a permission error (exit code 2),
+    falls back to nmap -sn which uses TCP SYN probes and requires no raw socket
+    privileges. This makes the scanner work on RHEL without cap_net_raw or
+    setuid ping.
     """
-    global _scan_running, _last_scan
+    import shutil
+    timeout_s = max(1, timeout_ms // 1000)
 
-    if _scan_running:
-        raise HTTPException(status_code=409, detail='A scan is already in progress')
-
-    config = load_config()
-
-    # Load DB-stored scan config (subnets + tuning saved by user in UI)
+    # Strategy 1: standard ICMP ping
     try:
-        db_cfg = db.query(models.ScanConfig).filter(models.ScanConfig.id == 1).first()
-        if db_cfg:
-            if db_cfg.subnets:
-                db_subnets = json.loads(db_cfg.subnets)
-                if db_subnets:
-                    from scanner.config import SubnetConfig as SC
-                    config.subnets = [SC(cidr=s['cidr'], description=s.get('description',''))
-                                      for s in db_subnets if s.get('cidr')]
-            if db_cfg.snmp_community:  config.snmp_community  = db_cfg.snmp_community
-            if db_cfg.snmp_port:       config.snmp_port        = db_cfg.snmp_port
-            if db_cfg.snmp_timeout:    config.snmp_timeout     = db_cfg.snmp_timeout
-            if db_cfg.snmp_retries:    config.snmp_retries     = db_cfg.snmp_retries
-            if db_cfg.ping_timeout_ms: config.ping_timeout_ms  = db_cfg.ping_timeout_ms
-            if db_cfg.ping_workers:    config.ping_workers      = db_cfg.ping_workers
-    except Exception as e:
-        log.warning(f"Could not load DB scan config: {e}")
+        result = subprocess.run(
+            ['ping', '-c', '1', '-W', str(timeout_s), ip],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            timeout=timeout_s + 1,
+        )
+        if result.returncode == 0:
+            return True
+        if result.returncode == 1:
+            return False   # host unreachable, not a permissions issue
+        # returncode 2 typically means operation not permitted — fall through
+    except subprocess.TimeoutExpired:
+        return False
+    except Exception:
+        pass
 
-    # Request-level overrides (manual scan page can override subnets/community)
-    if request.subnets:
-        from scanner.config import SubnetConfig as SC
-        config.subnets = [SC(cidr=s) for s in request.subnets]
-    if request.snmp_community:
-        config.snmp_community = request.snmp_community
-
-    def event_generator():
-        global _scan_running, _last_scan
-
-        with _scan_lock:
-            _scan_running = True
-
-        log_lines = []
-
-        def emit(level: str, msg: str):
-            line = json.dumps({'level': level, 'msg': msg})
-            log_lines.append(line)
-
+    # Strategy 2: nmap ping scan (no raw socket needed)
+    if shutil.which('nmap'):
         try:
-            scanner = NetworkScanner(config)
-            results = scanner.scan(subnets=request.subnets, emit=emit)
+            result = subprocess.run(
+                ['nmap', '-sn', '-T4', '--host-timeout', f'{timeout_s}s', ip],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                timeout=timeout_s + 3,
+            )
+            return b'Host is up' in result.stdout
+        except Exception:
+            pass
 
-            filepath = None
-            if results:
-                filepath = save_results(results, config.results_dir)
-                emit('ok', f'[✓] Results saved: {filepath}')
+    log.warning(
+        f"Cannot ping {ip}: no working ping method found. "
+        "Run deploy/fix_ping.sh or install nmap."
+    )
+    return False
 
-                if not request.dry_run:
-                    ok = post_results(results, config.api_url, config.api_token)
-                    if ok:
-                        emit('ok', '[✓] Inventory updated in NetTrack')
+def ping_sweep(subnet: str, timeout_ms: int = 800, workers: int = 64,
+               progress_cb: Optional[Callable[[str, bool], None]] = None) -> list[str]:
+    """Ping all hosts in subnet concurrently. Returns list of live IPs."""
+    network = ipaddress.ip_network(subnet, strict=False)
+    hosts   = list(network.hosts())
+    live    = []
+
+    with ThreadPoolExecutor(max_workers=min(workers, len(hosts))) as ex:
+        futures = {ex.submit(ping_host, str(h), timeout_ms): str(h) for h in hosts}
+        for future in as_completed(futures):
+            ip   = futures[future]
+            up   = future.result()
+            if up:
+                live.append(ip)
+            if progress_cb:
+                progress_cb(ip, up)
+    return live
+
+
+# ── Reverse DNS ───────────────────────────────────────────────────────────────
+
+def reverse_dns(ip: str) -> str:
+    try:
+        return socket.gethostbyaddr(ip)[0]
+    except Exception:
+        return ''
+
+
+# ── Main scanner ──────────────────────────────────────────────────────────────
+
+def check_ping_capability() -> dict:
+    """
+    Check what host discovery methods are available on this system.
+    Returns a dict with status info — called at startup and surfaced via /api/scan/status.
+    """
+    import shutil, subprocess
+    result = {'ping': False, 'nmap': False, 'method': None, 'warning': None}
+
+    try:
+        r = subprocess.run(['ping', '-c', '1', '-W', '1', '127.0.0.1'],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3)
+        result['ping'] = (r.returncode == 0)
+    except Exception:
+        pass
+
+    result['nmap'] = bool(shutil.which('nmap'))
+
+    if result['ping']:
+        result['method'] = 'ping'
+    elif result['nmap']:
+        result['method'] = 'nmap'
+        result['warning'] = (
+            'ICMP ping unavailable — using nmap for host discovery. '
+            'Run deploy/fix_ping.sh for the fastest scan performance.'
+        )
+    else:
+        result['method'] = None
+        result['warning'] = (
+            'Neither ping nor nmap is available to the nettrack user. '
+            'Run deploy/fix_ping.sh to fix this before scanning.'
+        )
+    return result
+
+
+class NetworkScanner:
+    def __init__(self, config: Optional[ScannerConfig] = None):
+        self.config = config or load_config()
+
+    def _snmp_client(self, ip: str, subnet_cfg: SubnetConfig) -> SNMPClient:
+        v3 = self.config.snmp_v3   # v3 creds always come from global config/env
+        return SNMPClient(
+            host=ip,
+            port=self.config.snmp_port,
+            timeout=self.config.snmp_timeout,
+            retries=self.config.snmp_retries,
+            community=subnet_cfg.snmp_community or self.config.snmp_community,
+            v3_username=v3.username if v3 else None,
+            v3_auth_key=v3.auth_key if v3 else None,
+            v3_priv_key=v3.priv_key if v3 else None,
+            v3_auth_protocol=v3.auth_protocol if v3 else 'sha',
+            v3_priv_protocol=v3.priv_protocol if v3 else 'aes',
+        )
+
+    def scan(self, subnets: Optional[list[str]] = None,
+             emit: Optional[Callable[[str, str], None]] = None) -> list[dict]:
+        """
+        Run a full network scan.
+
+        Args:
+            subnets: Override subnet list (uses config if None)
+            emit(level, message): Callback for streaming log lines to UI
+                level: 'info' | 'ok' | 'warn'
+
+        Returns:
+            List of discovered device dicts ready for bulk-upsert.
+        """
+        def log_emit(level: str, msg: str):
+            log.info(msg)
+            if emit:
+                emit(level, msg)
+
+        target_subnets = subnets or [s.cidr for s in self.config.subnets]
+        if not target_subnets:
+            log_emit('warn', '[!] No subnets configured. Aborting.')
+            return []
+
+        subnet_map = {s.cidr: s for s in self.config.subnets}
+        discovered: dict[str, dict] = {}   # mac → device dict
+        switch_ips: list[str] = []
+
+        # ── Phase 1: Ping sweep ───────────────────────────────────────────────
+        log_emit('info', f'[+] Starting scan of {len(target_subnets)} subnet(s)')
+        all_live: list[tuple[str, str]] = []   # (ip, subnet_cidr)
+
+        for cidr in target_subnets:
+            log_emit('info', f'[~] Ping sweep: {cidr}')
+            count = {'up': 0, 'down': 0}
+
+            def ping_cb(ip, up, c=count):
+                if up: c['up'] += 1
+                else:  c['down'] += 1
+
+            live = ping_sweep(cidr, self.config.ping_timeout_ms, self.config.ping_workers, ping_cb)
+            log_emit('ok', f'[✓] {cidr}: {len(live)} hosts up')
+            all_live.extend((ip, cidr) for ip in live)
+
+        if not all_live:
+            log_emit('warn', '[!] No hosts responded to ping. Check network access.')
+            return []
+
+        # ── Phase 2: Reverse DNS + SNMP on live hosts ─────────────────────────
+        log_emit('info', f'[~] Querying {len(all_live)} live hosts via SNMP...')
+        for ip, cidr in all_live:
+            subnet_cfg = subnet_map.get(cidr, self._default_subnet(cidr))
+            client     = self._snmp_client(ip, subnet_cfg)
+            device     = {'ip': ip, 'status': 'Online', 'last_seen': datetime.now(timezone.utc).isoformat()}
+
+            # Reverse DNS
+            hostname = reverse_dns(ip)
+            if hostname:
+                device['hostname'] = hostname
+
+            # SNMP
+            try:
+                sys_info = client.get_sys_info()
+                if sys_info:
+                    device['snmp_descr'] = sys_info.get('sys_descr', '')
+                    device['snmp_name']  = sys_info.get('sys_name', '')
+                    if not device.get('hostname') and device['snmp_name']:
+                        device['hostname'] = device['snmp_name']
+
+                    # Identify switches for LLDP/ARP walk
+                    descr_lower = device['snmp_descr'].lower()
+                    if any(k in descr_lower for k in ['ios', 'nexus', 'catalyst', 'switch']):
+                        switch_ips.append(ip)
+                    log_emit('ok', f'[✓] SNMP {ip}: {device["snmp_descr"][:60]}')
+                else:
+                    log_emit('info', f'[~] SNMP {ip}: no response')
+            except Exception as e:
+                log_emit('warn', f'[!] SNMP {ip}: {e}')
+
+            # Try to get MAC from SNMP interfaces
+            try:
+                ifaces = client.get_interfaces()
+                for iface in ifaces:
+                    if iface.get('mac') and iface['mac'] != '00:00:00:00:00:00':
+                        device['mac'] = iface['mac']
+                        break
+            except Exception:
+                pass
+
+            mac = device.get('mac', ip)   # use IP as key if no MAC yet
+            discovered[mac] = device
+
+        # ── Phase 3: ARP table from switches ─────────────────────────────────
+        log_emit('info', f'[~] Collecting ARP tables from {len(switch_ips)} switch(es)...')
+        for sw_ip in switch_ips:
+            subnet_cfg = self._find_subnet_cfg(sw_ip, subnet_map)
+            client     = self._snmp_client(sw_ip, subnet_cfg)
+            try:
+                arp_entries = client.get_arp_table()
+                for entry in arp_entries:
+                    mac = entry.get('mac', '')
+                    ip  = entry.get('ip', '')
+                    if mac and ip:
+                        existing = discovered.get(mac)
+                        if existing:
+                            existing.setdefault('ip', ip)
+                        else:
+                            discovered[mac] = {'ip': ip, 'mac': mac, 'status': 'Unknown'}
+                log_emit('ok', f'[✓] ARP {sw_ip}: {len(arp_entries)} entries')
+            except Exception as e:
+                log_emit('warn', f'[!] ARP {sw_ip}: {e}')
+
+        # ── Phase 4: LLDP neighbor walk on switches ───────────────────────────
+        log_emit('info', f'[~] Collecting LLDP neighbors from {len(switch_ips)} switch(es)...')
+        port_map: dict[str, dict] = {}  # mac → {switch, port}
+
+        for sw_ip in switch_ips:
+            sw_name    = next((d.get('hostname', sw_ip) for d in discovered.values() if d.get('ip') == sw_ip), sw_ip)
+            subnet_cfg = self._find_subnet_cfg(sw_ip, subnet_map)
+            client     = self._snmp_client(sw_ip, subnet_cfg)
+            try:
+                neighbors = get_lldp_neighbors(client)
+                ifaces    = {i['index']: i.get('descr', f'Port{i["index"]}') for i in client.get_interfaces()}
+                for n in neighbors:
+                    port_name = ifaces.get(n['local_port_idx'], f'Port{n["local_port_idx"]}')
+                    chassis   = n.get('remote_chassis', '')
+                    sys_name  = n.get('remote_sys_name', '')
+                    mgmt_ip   = n.get('remote_mgmt_ip', '')
+                    log_emit('ok', f'[✓] LLDP: {sys_name or chassis} → {sw_name} {port_name}')
+
+                    # Match by MAC or management IP
+                    matched_mac = None
+                    for mac, dev in discovered.items():
+                        if (chassis and mac.upper() == chassis.upper()) or \
+                           (mgmt_ip and dev.get('ip') == mgmt_ip):
+                            matched_mac = mac
+                            break
+                    if matched_mac:
+                        discovered[matched_mac].update({
+                            'switch': sw_name, 'port': port_name,
+                            'hostname': discovered[matched_mac].get('hostname') or sys_name,
+                        })
                     else:
-                        emit('warn', '[!] Failed to POST results to API — check api_url/api_token in config')
+                        port_map[chassis] = {'switch': sw_name, 'port': port_name, 'hostname': sys_name}
 
-            _last_scan = {
-                'scanned_at':    datetime.utcnow().isoformat(),
-                'device_count':  len(results),
-                'saved_file':    filepath,
-                'triggered_by':  current_user.email,
-            }
+                log_emit('ok', f'[✓] LLDP {sw_name}: {len(neighbors)} neighbors')
+            except Exception as e:
+                log_emit('warn', f'[!] LLDP {sw_ip}: {e}')
 
-            # Yield all buffered lines then the done event
-            for line in log_lines:
-                yield f'data: {line}\n\n'
+        # ── Phase 5: MAC bridge table for non-LLDP devices ───────────────────
+        log_emit('info', '[~] Collecting MAC bridge tables...')
+        for sw_ip in switch_ips:
+            sw_name    = next((d.get('hostname', sw_ip) for d in discovered.values() if d.get('ip') == sw_ip), sw_ip)
+            subnet_cfg = self._find_subnet_cfg(sw_ip, subnet_map)
+            client     = self._snmp_client(sw_ip, subnet_cfg)
+            try:
+                mac_entries = get_mac_port_table(client)
+                ifaces      = {i['index']: i.get('descr', '') for i in client.get_interfaces()}
+                for entry in mac_entries:
+                    mac      = entry['mac']
+                    port_idx = entry.get('port_idx')
+                    port_name = ifaces.get(port_idx, f'Port{port_idx}')
+                    if mac in discovered and not discovered[mac].get('switch'):
+                        discovered[mac].update({'switch': sw_name, 'port': port_name})
+            except Exception as e:
+                log_emit('warn', f'[!] MAC table {sw_ip}: {e}')
 
-            yield f'data: {json.dumps({"level": "done", "device_count": len(results), "saved": filepath})}\n\n'
+        # ── Phase 6: OUI vendor lookup + type inference ───────────────────────
+        log_emit('info', '[~] Running OUI vendor lookup...')
+        for mac, device in discovered.items():
+            vendor = oui_lookup(mac) if ':' in mac else ''
+            if vendor:
+                device['vendor'] = vendor
+                log_emit('ok', f'[✓] {mac[:8]}:xx → {vendor}')
+            if not device.get('type'):
+                device['type'] = infer_type(
+                    vendor,
+                    device.get('snmp_descr', ''),
+                    device.get('hostname', ''),
+                )
 
-        except Exception as e:
-            yield f'data: {json.dumps({"level": "warn", "msg": f"[!] Scan error: {e}"})}\n\n'
-            yield f'data: {json.dumps({"level": "done", "device_count": 0, "saved": None})}\n\n'
-        finally:
-            _scan_running = False
+        # ── Finalise ──────────────────────────────────────────────────────────
+        results = []
+        for mac, device in discovered.items():
+            if ':' in mac:
+                device['mac'] = mac
+            results.append({
+                'hostname': device.get('hostname') or device.get('ip', ''),
+                'ip':       device.get('ip', ''),
+                'mac':      device.get('mac', ''),
+                'type':     device.get('type', 'Other'),
+                'status':   device.get('status', 'Unknown'),
+                'switch':   device.get('switch', ''),
+                'port':     device.get('port', ''),
+                'notes':    device.get('vendor', ''),
+            })
 
-    return StreamingResponse(
-        event_generator(),
-        media_type='text/event-stream',
-        headers={
-            'Cache-Control':   'no-cache',
-            'X-Accel-Buffering': 'no',   # disable nginx buffering for SSE
-        },
-    )
+        log_emit('ok', f'[✓] Scan complete. {len(results)} devices discovered.')
+        return results
+
+    def _default_subnet(self, cidr: str):
+        from scanner.config import SubnetConfig
+        return SubnetConfig(cidr=cidr, snmp_community=self.config.snmp_community)
+
+    def _find_subnet_cfg(self, ip: str, subnet_map: dict):
+        addr = ipaddress.ip_address(ip)
+        for cidr, cfg in subnet_map.items():
+            if addr in ipaddress.ip_network(cidr, strict=False):
+                return cfg
+        return self._default_subnet('0.0.0.0/0')
 
 
-@router.get('/status', response_model=ScanStatus)
-def scan_status(_: models.User = Depends(auth.require_role('read_only'))):
-    capability = check_ping_capability()
-    return ScanStatus(
-        running=_scan_running,
-        last_scan=_last_scan or None,
-        ping_method=capability.get('method'),
-        ping_warning=capability.get('warning'),
-    )
+# ── Results persistence ───────────────────────────────────────────────────────
+
+def save_results(results: list[dict], results_dir: str) -> str:
+    os.makedirs(results_dir, exist_ok=True)
+    ts       = datetime.now().strftime('%Y%m%d_%H%M%S')
+    filepath = os.path.join(results_dir, f'scan_{ts}.json')
+    with open(filepath, 'w') as f:
+        json.dump({'scanned_at': ts, 'device_count': len(results), 'devices': results}, f, indent=2, default=str)
+    return filepath
 
 
-@router.get('/results')
-def list_results(_: models.User = Depends(auth.require_role('read_only'))):
-    """List saved scan result files."""
-    config = load_config()
-    import os
-    if not os.path.isdir(config.results_dir):
-        return []
-    files = sorted(
-        [f for f in os.listdir(config.results_dir) if f.endswith('.json')],
-        reverse=True,
-    )
-    return [{'filename': f, 'path': os.path.join(config.results_dir, f)} for f in files[:50]]
+def post_results(results: list[dict], api_url: str, token: str,
+                  scan_id: str = None) -> bool:
+    """POST discovered devices to the discovery queue endpoint."""
+    try:
+        import uuid as _uuid
+        headers = {'Content-Type': 'application/json'}
+        if token:
+            headers['Authorization'] = f'Bearer {token}'
+        payload = {
+            'devices': results,
+            'scan_id': scan_id or str(_uuid.uuid4())[:8],
+        }
+        res = requests.post(
+            f'{api_url.rstrip("/")}/api/queue/ingest',
+            json=payload,
+            headers=headers,
+            timeout=30,
+        )
+        res.raise_for_status()
+        data = res.json()
+        log.info(
+            f'Queue ingest: {data.get("new",0)} new, '
+            f'{data.get("changed",0)} changed, '
+            f'{data.get("known",0)} known, '
+            f'{data.get("blocked",0)} blocked'
+        )
+        return True
+    except Exception as e:
+        log.error(f'Failed to POST results to queue: {e}')
+        return False
