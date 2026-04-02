@@ -17,6 +17,40 @@
     --amber: #854F0B; --amber-bg: #FAEEDA;
     --blue: #185FA5; --blue-bg: #E6F1FB;
   }
+
+  /* ── Dark mode — system preference ── */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f0f0e; --surface: #1a1a18; --surface2: #252523;
+      --border: rgba(255,255,255,0.08); --border2: rgba(255,255,255,0.15);
+      --text: #f0f0ee; --text2: #a0a09c; --text3: #606060;
+      --accent: #f0f0ee;
+      --green: #5a9e2f; --green-bg: #1a2e10;
+      --red: #c94f4f; --red-bg: #2e1010;
+      --amber: #c47d20; --amber-bg: #2e1e08;
+      --blue: #4a8fd4; --blue-bg: #0e1e30;
+    }
+  }
+
+  /* ── Dark mode — manual override ── */
+  :root[data-theme="dark"] {
+    --bg: #0f0f0e; --surface: #1a1a18; --surface2: #252523;
+    --border: rgba(255,255,255,0.08); --border2: rgba(255,255,255,0.15);
+    --text: #f0f0ee; --text2: #a0a09c; --text3: #606060;
+    --accent: #f0f0ee;
+    --green: #5a9e2f; --green-bg: #1a2e10;
+    --red: #c94f4f; --red-bg: #2e1010;
+    --amber: #c47d20; --amber-bg: #2e1e08;
+    --blue: #4a8fd4; --blue-bg: #0e1e30;
+  }
+
+  /* ── Dark mode extras ── */
+  :root[data-theme="dark"] .sidebar,
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .sidebar { border-right-color: var(--border); } }
+
+  /* Toggle button */
+  .theme-toggle { background:none; border:none; cursor:pointer; color:var(--text2); padding:4px; font-size:16px; line-height:1; }
+  .theme-toggle:hover { color:var(--text); }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); font-size: 14px; min-height: 100vh; }
 
   /* ── Layout ── */
@@ -277,9 +311,12 @@
           <div class="sidebar-user-role" id="sb-role">—</div>
           <div class="sidebar-user-email" id="sb-email">—</div>
         </div>
-        <button class="btn btn-sm" onclick="doLogout()" title="Sign out">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-        </button>
+        <div style="display:flex;gap:4px;">
+          <button class="theme-toggle" onclick="toggleTheme()" id="theme-btn" title="Toggle dark mode">🌙</button>
+          <button class="btn btn-sm" onclick="doLogout()" title="Sign out">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+          </button>
+        </div>
       </div>
     </div>
   </aside>
@@ -919,31 +956,53 @@ function renderTopology() {
 }
 
 // ── Charts ────────────────────────────────────────────────────────────────────
+function getChartColors() {
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark' ||
+    (!document.documentElement.getAttribute('data-theme') &&
+     window.matchMedia('(prefers-color-scheme: dark)').matches);
+  return {
+    grid:   isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)',
+    text:   isDark ? '#a0a09c' : '#6b6b67',
+    types:  isDark
+      ? ['#4a8fd4','#5a9e2f','#c47d20','#c94f4f','#2a9e75','#c94f4f','#7a6ad4','#777']
+      : ['#185FA5','#3B6D11','#854F0B','#A32D2D','#0F6E56','#993C1D','#534AB7','#555'],
+    online:  isDark ? '#5a9e2f' : '#3B6D11',
+    offline: isDark ? '#c94f4f' : '#A32D2D',
+    amber:   isDark ? '#c47d20' : '#854F0B',
+    blue:    isDark ? '#4a8fd4' : '#185FA5',
+  };
+}
+
 function renderCharts() {
   if (chartsRendered) return;
   chartsRendered = true;
   const typeCount = {};
   devices.forEach(d => typeCount[d.type] = (typeCount[d.type] || 0) + 1);
-  const clrs = ['#185FA5','#3B6D11','#854F0B','#A32D2D','#0F6E56','#993C1D','#534AB7','#555'];
+  const cc = getChartColors();
   new Chart(document.getElementById('chart-type'), {
     type: 'doughnut',
-    data: { labels: Object.keys(typeCount), datasets: [{ data: Object.values(typeCount), backgroundColor: clrs, borderWidth: 0 }] },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { font: { size: 12 }, boxWidth: 12 } } } },
+    data: { labels: Object.keys(typeCount), datasets: [{ data: Object.values(typeCount), backgroundColor: cc.types, borderWidth: 0 }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { font: { size: 12 }, boxWidth: 12, color: cc.text } } } },
   });
   const online  = devices.filter(d => d.status === 'Online').length;
   const offline = devices.filter(d => d.status === 'Offline').length;
   const unknown = devices.filter(d => d.status === 'Unknown').length;
   new Chart(document.getElementById('chart-status'), {
     type: 'doughnut',
-    data: { labels: ['Online','Offline','Unknown'], datasets: [{ data: [online, offline, unknown], backgroundColor: ['#3B6D11','#A32D2D','#854F0B'], borderWidth: 0 }] },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { font: { size: 12 }, boxWidth: 12 } } } },
+    data: { labels: ['Online','Offline','Unknown'], datasets: [{ data: [online, offline, unknown], backgroundColor: [cc.online, cc.offline, cc.amber], borderWidth: 0 }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { font: { size: 12 }, boxWidth: 12, color: cc.text } } } },
   });
   const switches  = [...new Set(devices.map(d => d.switch).filter(Boolean))].sort();
   const swCounts  = switches.map(s => devices.filter(d => d.switch === s).length);
   new Chart(document.getElementById('chart-switch'), {
     type: 'bar',
-    data: { labels: switches, datasets: [{ data: swCounts, backgroundColor: '#185FA5', borderRadius: 4, borderSkipped: false }] },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } }, x: { grid: { display: false } } } },
+    data: { labels: switches, datasets: [{ data: swCounts, backgroundColor: cc.blue, borderRadius: 4, borderSkipped: false }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
+      scales: {
+        y: { beginAtZero: true, ticks: { stepSize: 1, color: cc.text }, grid: { color: cc.grid } },
+        x: { grid: { display: false }, ticks: { color: cc.text } }
+      }
+    },
   });
 }
 
@@ -2061,6 +2120,38 @@ async function loadScanStatus() {
 document.addEventListener('keydown', e => {
   if (e.key === 'Enter' && document.getElementById('login-screen').style.display !== 'none') doLogin();
 });
+
+// ── Theme toggle ─────────────────────────────────────────────────────────────
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem('theme', theme);
+  const btn = document.getElementById('theme-btn');
+  if (btn) btn.textContent = theme === 'dark' ? '☀️' : '🌙';
+}
+
+function toggleTheme() {
+  const current = document.documentElement.getAttribute('data-theme');
+  const systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  // If no override set, current effective theme is system preference
+  const effective = current || (systemDark ? 'dark' : 'light');
+  applyTheme(effective === 'dark' ? 'light' : 'dark');
+  chartsRendered = false;  // re-render charts with new colors
+}
+
+// Apply saved theme on load
+(function() {
+  const saved = localStorage.getItem('theme');
+  if (saved) applyTheme(saved);
+  // Set correct icon after DOM ready
+  document.addEventListener('DOMContentLoaded', () => {
+    const btn = document.getElementById('theme-btn');
+    if (!btn) return;
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark' ||
+      (!document.documentElement.getAttribute('data-theme') &&
+       window.matchMedia('(prefers-color-scheme: dark)').matches);
+    btn.textContent = isDark ? '☀️' : '🌙';
+  });
+})();
 
 // ── Password field validation ────────────────────────────────────────────────
 function validatePasswordField(input) {
