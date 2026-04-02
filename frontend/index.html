@@ -609,6 +609,11 @@ async function apiFetch(path, options = {}) {
   const _tok = window._accessToken || sessionStorage.getItem('nettrack_token');
   if (_tok) headers['Authorization'] = 'Bearer ' + _tok;
   let res = await fetch(API + path, { ...options, headers, credentials: 'include' });
+  // Auto-logout on 401 — session expired or token invalid
+  if (res.status === 401 && path !== '/api/auth/login' && path !== '/api/auth/refresh') {
+    sessionExpired();
+    return null;
+  }
 
   if (res.status === 401) {
     // Attempt a single token refresh, deduplicating concurrent calls
@@ -682,6 +687,21 @@ function doSSOLogin() {
   window.location.href = API + '/api/auth/sso/login';
 }
 
+function sessionExpired() {
+  stopStatusPolling();
+  window._accessToken = null;
+  sessionStorage.removeItem('nettrack_token');
+  currentUser = null;
+  // Show login screen with expiry message
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('login-screen').style.display = '';
+  const err = document.getElementById('login-error');
+  if (err) {
+    err.textContent = 'Your session has expired. Please sign in again.';
+    err.style.display = '';
+  }
+}
+
 async function doLogout() {
   stopStatusPolling();
   window._accessToken = null;
@@ -698,11 +718,38 @@ function showLoginScreen() {
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
+function _tokenExpired(token) {
+  // Returns true if JWT is expired or unparseable
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    return payload.exp && (payload.exp * 1000) < Date.now();
+  } catch(e) { return true; }
+}
+
 async function initApp() {
   // Restore token from sessionStorage on page refresh
   if (!window._accessToken) {
     const saved = sessionStorage.getItem('nettrack_token');
     if (saved) window._accessToken = saved;
+  }
+
+  // If token is expired, try to silently refresh it using the HttpOnly cookie
+  if (window._accessToken && _tokenExpired(window._accessToken)) {
+    window._accessToken = null;
+    sessionStorage.removeItem('nettrack_token');
+    try {
+      const refreshRes = await fetch(API + '/api/auth/refresh', {
+        method: 'POST',
+        credentials: 'include',
+      });
+      if (refreshRes.ok) {
+        const refreshData = await refreshRes.json().catch(() => ({}));
+        if (refreshData.access_token) {
+          window._accessToken = refreshData.access_token;
+          sessionStorage.setItem('nettrack_token', refreshData.access_token);
+        }
+      }
+    } catch(e) {}
   }
   const res = await apiFetch('/api/users/me');
   if (!res || !res.ok) { showLoginScreen(); return; }
