@@ -679,6 +679,7 @@ function doSSOLogin() {
 }
 
 async function doLogout() {
+  stopStatusPolling();
   // Server clears the HttpOnly cookie
   await apiFetch('/api/auth/logout', { method: 'POST' });
   showLoginScreen();
@@ -719,6 +720,7 @@ async function initApp() {
   await loadReferenceData();
   await loadDevices();
   showPage('devices');
+  startStatusPolling();
 }
 
 // ── Devices ───────────────────────────────────────────────────────────────────
@@ -2274,6 +2276,57 @@ function toggleTheme() {
     btn.textContent = isDark ? '☀️' : '🌙';
   });
 })();
+
+// ── Real-time device status polling ──────────────────────────────────────────
+let _statusPollTimer = null;
+
+async function pollDeviceStatuses() {
+  if (!currentUser) return;
+  try {
+    const res = await apiFetch('/api/devices/statuses');
+    if (!res || !res.ok) return;
+    const statuses = await res.json();
+
+    let changed = false;
+    statuses.forEach(s => {
+      // Update in-memory devices array
+      const dev = devices.find(d => d.id === s.id);
+      if (dev && dev.status !== s.status) {
+        dev.status = s.status;
+        dev.last_seen = s.last_seen;
+        changed = true;
+      }
+
+      // Update status badge in the table without re-rendering the whole table
+      const row = document.querySelector(`tr[data-device-id="${s.id}"]`);
+      if (row) {
+        const statusCell = row.querySelector('.status-cell');
+        if (statusCell && statusCell.dataset.status !== s.status) {
+          statusCell.innerHTML = statusBadge(s.status);
+          statusCell.dataset.status = s.status;
+
+          // Flash row briefly to highlight the change
+          row.style.transition = 'background 0.5s';
+          row.style.background = s.status === 'Online'
+            ? 'var(--green-bg)' : 'var(--red-bg)';
+          setTimeout(() => { row.style.background = ''; }, 1500);
+        }
+      }
+    });
+
+    // Update metrics if anything changed
+    if (changed) renderMetrics();
+  } catch(e) {}
+}
+
+function startStatusPolling() {
+  if (_statusPollTimer) clearInterval(_statusPollTimer);
+  _statusPollTimer = setInterval(pollDeviceStatuses, 30000);  // every 30s
+}
+
+function stopStatusPolling() {
+  if (_statusPollTimer) { clearInterval(_statusPollTimer); _statusPollTimer = null; }
+}
 
 // ── Password field validation ────────────────────────────────────────────────
 function validatePasswordField(input) {

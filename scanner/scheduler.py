@@ -132,6 +132,76 @@ def run_scheduled_scan():
         db.close()
 
 
+def run_status_poll():
+    """
+    Lightweight liveness check — pings every device in inventory and updates
+    status to Online/Offline. Runs every 5 minutes independently of full scans.
+    Does NOT trigger queue ingest — just updates status and last_seen in place.
+    """
+    from database import SessionLocal
+    import models
+    import subprocess, socket
+    from datetime import datetime, timezone
+
+    db = SessionLocal()
+    try:
+        devices = db.query(models.Device).filter(
+            models.Device.ip.isnot(None),
+            models.Device.ip != '',
+        ).all()
+
+        if not devices:
+            return
+
+        log.info(f"Status poll: checking {len(devices)} devices...")
+        changed = 0
+        now     = datetime.now(timezone.utc)
+
+        for device in devices:
+            try:
+                result = subprocess.run(
+                    ['ping', '-c', '1', '-W', '1', device.ip],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=3,
+                )
+                is_up = result.returncode == 0
+            except Exception:
+                is_up = False
+
+            new_status = 'Online' if is_up else 'Offline'
+            if device.status != new_status:
+                log.info(f"Status change: {device.ip} {device.status} → {new_status}")
+                device.status = new_status
+                changed += 1
+            if is_up:
+                device.last_seen = now
+
+        db.commit()
+        log.info(f"Status poll complete: {changed} status change(s)")
+
+        # Fire offline alerts if configured
+        if changed > 0:
+            try:
+                alert_cfg = db.query(models.AlertConfig).filter(models.AlertConfig.id == 1).first()
+                if alert_cfg and alert_cfg.enabled:
+                    from scanner.alerts import send_offline_devices
+                    newly_offline = [
+                        {"hostname": d.hostname, "ip": d.ip, "mac": d.mac,
+                         "type": d.type, "switch": d.switch, "port": d.port}
+                        for d in devices if d.status == 'Offline'
+                    ]
+                    if newly_offline:
+                        send_offline_devices(alert_cfg, newly_offline)
+            except Exception as e:
+                log.warning(f"Could not send offline alerts: {e}")
+
+    except Exception as e:
+        log.error(f"Status poll failed: {e}", exc_info=True)
+    finally:
+        db.close()
+
+
 def _update_schedule_row(db, status: str, found: int, new: int, offline: int):
     import models
     row = db.query(models.ScanSchedule).filter(models.ScanSchedule.id == 1).first()
@@ -169,8 +239,19 @@ def start_scheduler():
             log.info(f"Scheduled scan enabled: {row.preset} ({cron})")
         else:
             log.info("Scheduled scan is disabled — enable via admin UI")
+
     except Exception as e:
         log.warning(f"Could not load schedule from DB at startup: {e}")
+
+    # Always run the status poller every 5 min regardless of scan schedule
+    _scheduler.add_job(
+        run_status_poll,
+        trigger='interval',
+        minutes=5,
+        id='status_poll',
+        replace_existing=True,
+    )
+    log.info("Status poller started — runs every 5 minutes")
 
 
 def stop_scheduler():

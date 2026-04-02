@@ -85,6 +85,29 @@ app.include_router(audit.router)
 app.include_router(scanner_router.router)
 app.include_router(schedule_router.router)
 app.include_router(floors_router.router)
+
+# ── Lightweight device status endpoint for real-time polling ──────────────────
+from fastapi import Depends as _Depends
+from sqlalchemy.orm import Session as _Session
+from database import get_db as _get_db
+from datetime import datetime as _dt
+
+@app.get("/api/devices/statuses")
+def device_statuses(
+    _: models.User = _Depends(auth.require_role("read_only")),
+    db: _Session = _Depends(_get_db),
+):
+    rows = db.query(
+        models.Device.id,
+        models.Device.ip,
+        models.Device.status,
+        models.Device.last_seen,
+    ).all()
+    return [
+        {"id": r.id, "ip": r.ip, "status": r.status,
+         "last_seen": r.last_seen.isoformat() if r.last_seen else None}
+        for r in rows
+    ]
 app.include_router(queue_router.router)
 app.include_router(vlans_router.router)
 
