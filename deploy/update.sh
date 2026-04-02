@@ -75,6 +75,29 @@ info "Setting frontend permissions..."
 chmod o+rx "${APP_DIR}" "${APP_DIR}/frontend"
 find "${APP_DIR}/frontend" -type f -exec chmod o+r {} \;
 
+# ── Generate scanner API token if not set ────────────────────────────────────
+CURRENT_TOKEN=$(grep "^SCANNER_API_TOKEN=" "${ENV_FILE}" | cut -d= -f2)
+if [[ -z "${CURRENT_TOKEN}" ]]; then
+    info "Generating scanner API token..."
+    SCANNER_TOKEN=$(sudo -u "${APP_USER}" --preserve-env=SECRET_KEY,PYTHONPATH \
+        python3 -c "
+import sys
+sys.path.insert(0, '${APP_DIR}')
+from auth import create_access_token
+print(create_access_token(1, 'modify'))
+" 2>/dev/null || true)
+    if [[ -n "${SCANNER_TOKEN}" ]]; then
+        sed -i "s|^SCANNER_API_TOKEN=.*|SCANNER_API_TOKEN=${SCANNER_TOKEN}|" "${ENV_FILE}"
+        info "Scanner API token generated and saved ✓"
+        systemctl restart nettrack
+        sleep 2
+    else
+        warn "Could not generate scanner token — set SCANNER_API_TOKEN manually in ${ENV_FILE}"
+    fi
+else
+    info "Scanner API token already set ✓"
+fi
+
 # ── Done ──────────────────────────────────────────────────────────────────────
 echo ""
 echo -e "${GREEN}Update complete.${NC}"

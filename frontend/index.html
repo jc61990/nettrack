@@ -1022,45 +1022,94 @@ function addSubnet() {
 }
 function removeSubnet(btn) { btn.parentElement.remove(); }
 
-function startScan() {
+async function startScan() {
   const subnets = [...document.querySelectorAll('.subnet-input')].map(i => i.value.trim()).filter(Boolean);
   if (!subnets.length) return;
   const log = document.getElementById('scan-log');
   const bar = document.getElementById('scan-progress');
   const btn = document.getElementById('scan-btn');
-  log.innerHTML = ''; bar.style.width = '0%'; btn.disabled = true; btn.textContent = 'Scanning...';
-  const lines = [
-    {t:200,cls:'',msg:'[+] Starting network discovery...'},
-    {t:500,cls:'',msg:`[+] Subnets: ${subnets.join(', ')}`},
-    {t:900,cls:'',msg:'[~] Sending ICMP ping sweep...'},
-    {t:1400,cls:'ok',msg:'[✓] 10.0.1.11 — responding (8ms)'},
-    {t:1700,cls:'ok',msg:'[✓] 10.0.1.12 — responding (12ms)'},
-    {t:1900,cls:'warn',msg:'[!] 10.0.1.13 — no response (timeout)'},
-    {t:2400,cls:'',msg:'[~] Running ARP collection...'},
-    {t:2900,cls:'ok',msg:'[✓] ARP: 10.0.1.11 → AA:BB:CC:11:22:01'},
-    {t:3300,cls:'',msg:'[~] Querying SNMP...'},
-    {t:3700,cls:'ok',msg:'[✓] SNMP: SW-01 — Cisco IOS 15.2'},
-    {t:4100,cls:'warn',msg:'[!] SNMP: 10.0.1.13 — community string rejected'},
-    {t:4500,cls:'',msg:'[~] Collecting LLDP neighbors...'},
-    {t:4900,cls:'ok',msg:'[✓] LLDP: cam-lobby-01 → SW-01 Gi0/1'},
-    {t:5300,cls:'ok',msg:'[✓] LLDP: ac-door-01 → SW-01 Gi0/5'},
-    {t:5600,cls:'',msg:'[~] MAC OUI lookup...'},
-    {t:5900,cls:'ok',msg:'[✓] AA:BB:CC:11:22:xx → Hikvision'},
-    {t:6200,cls:'ok',msg:'[✓] Scan complete. 11 hosts up, 1 offline.'},
-    {t:6400,cls:'ok',msg:'[✓] 3 new devices found. 9 records updated.'},
-  ];
-  const total = lines[lines.length - 1].t;
-  lines.forEach(({ t, cls, msg }) => {
-    setTimeout(() => {
-      const div = document.createElement('div');
-      div.className = `scan-log-line ${cls}`;
-      div.textContent = msg;
-      log.appendChild(div);
-      log.scrollTop = log.scrollHeight;
-      bar.style.width = Math.round((t / total) * 100) + '%';
-      if (t === total) { btn.disabled = false; btn.textContent = 'Start scan'; loadDevices(); }
-    }, t);
-  });
+  log.innerHTML = '';
+  bar.style.width = '0%';
+  btn.disabled = true;
+  btn.textContent = 'Scanning...';
+
+  function appendLine(msg, cls) {
+    const div = document.createElement('div');
+    div.className = 'scan-log-line' + (cls ? ' ' + cls : '');
+    div.textContent = msg;
+    log.appendChild(div);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function classForMsg(msg) {
+    if (msg.startsWith('[✓]')) return 'ok';
+    if (msg.startsWith('[!]')) return 'warn';
+    return '';
+  }
+
+  appendLine('[+] Connecting to scanner...', '');
+
+  try {
+    // Build request with auth header since EventSource doesn't support headers
+    // We use fetch with SSE streaming instead
+    const token = window._accessToken;
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+
+    const res = await fetch(API + '/api/scan/trigger', {
+      method: 'POST',
+      headers,
+      credentials: 'include',
+      body: JSON.stringify({ subnets }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      appendLine('[✗] ' + (err.detail || 'Scan failed to start'), 'warn');
+      btn.disabled = false; btn.textContent = 'Start scan';
+      return;
+    }
+
+    // Stream SSE response
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let progress = 0;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        try {
+          const data = JSON.parse(line.slice(6));
+          if (data.level === 'done') {
+            bar.style.width = '100%';
+            appendLine(`[✓] Scan complete. ${data.device_count} devices found.`, 'ok');
+            if (data.device_count > 0) {
+              appendLine('[✓] Results sent to discovery queue for review.', 'ok');
+            }
+            await refreshQueueBadge();
+            btn.disabled = false; btn.textContent = 'Start scan';
+            return;
+          }
+          if (data.msg) {
+            progress = Math.min(progress + 2, 95);
+            bar.style.width = progress + '%';
+            appendLine(data.msg, classForMsg(data.msg));
+          }
+        } catch(e) {}
+      }
+    }
+  } catch(e) {
+    appendLine('[✗] Error: ' + e.message, 'warn');
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'Start scan';
 }
 
 // ── Users ─────────────────────────────────────────────────────────────────────

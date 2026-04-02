@@ -207,6 +207,22 @@ else:
 db.close()
 "
 
+# ── 10b. Generate scanner API token ─────────────────────────────────────────
+info "Generating scanner API token..."
+SCANNER_TOKEN=$(sudo -u "${APP_USER}" --preserve-env=SECRET_KEY,PYTHONPATH \
+    python3 -c "
+import sys
+sys.path.insert(0, '${APP_DIR}')
+from auth import create_access_token
+print(create_access_token(1, 'modify'))
+" 2>/dev/null || true)
+if [[ -n "${SCANNER_TOKEN}" ]]; then
+    sed -i "s|^SCANNER_API_TOKEN=.*|SCANNER_API_TOKEN=${SCANNER_TOKEN}|" "${ENV_FILE}"
+    info "Scanner API token saved to ${ENV_FILE} ✓"
+else
+    warn "Could not generate scanner token — set SCANNER_API_TOKEN manually in ${ENV_FILE}"
+fi
+
 # ── 11. Systemd service ───────────────────────────────────────────────────────
 info "Installing systemd service..."
 
