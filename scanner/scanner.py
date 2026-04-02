@@ -323,6 +323,17 @@ class NetworkScanner:
             log_emit('warn', '[!] No hosts responded to ping. Check network access.')
             return []
 
+        # ── Phase 1b: ARP scan to get MACs ────────────────────────────────────
+        arp_cache: dict = {}
+        for cidr in target_subnets:
+            log_emit('info', f'[~] ARP scan: {cidr}')
+            found = arp_scan(cidr)
+            arp_cache.update(found)
+            if found:
+                log_emit('ok', f'[✓] ARP scan {cidr}: {len(found)} MACs found')
+            else:
+                log_emit('info', f'[~] ARP scan {cidr}: no MACs (try running as root)')
+
         # ── Phase 2: Reverse DNS + SNMP on live hosts ─────────────────────────
         log_emit('info', f'[~] Querying {len(all_live)} live hosts via SNMP...')
         for ip, cidr in all_live:
