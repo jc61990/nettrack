@@ -606,7 +606,8 @@ let _refreshing = null;   // deduplicate concurrent refresh attempts
 
 async function apiFetch(path, options = {}) {
   const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
-  if (window._accessToken) headers['Authorization'] = 'Bearer ' + window._accessToken;
+  const _tok = window._accessToken || sessionStorage.getItem('nettrack_token');
+  if (_tok) headers['Authorization'] = 'Bearer ' + _tok;
   let res = await fetch(API + path, { ...options, headers, credentials: 'include' });
 
   if (res.status === 401) {
@@ -661,7 +662,10 @@ async function doLogin() {
       err.style.display = '';
     } else {
       const data = await res.json().catch(() => ({}));
-      if (data.access_token) window._accessToken = data.access_token;
+      if (data.access_token) {
+        window._accessToken = data.access_token;
+        sessionStorage.setItem('nettrack_token', data.access_token);
+      }
       await initApp();
     }
   } catch(e) {
@@ -680,6 +684,8 @@ function doSSOLogin() {
 
 async function doLogout() {
   stopStatusPolling();
+  window._accessToken = null;
+  sessionStorage.removeItem('nettrack_token');
   // Server clears the HttpOnly cookie
   await apiFetch('/api/auth/logout', { method: 'POST' });
   showLoginScreen();
@@ -693,6 +699,11 @@ function showLoginScreen() {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 async function initApp() {
+  // Restore token from sessionStorage on page refresh
+  if (!window._accessToken) {
+    const saved = sessionStorage.getItem('nettrack_token');
+    if (saved) window._accessToken = saved;
+  }
   const res = await apiFetch('/api/users/me');
   if (!res || !res.ok) { showLoginScreen(); return; }
   currentUser = await res.json();
@@ -1120,7 +1131,7 @@ async function startScan() {
   try {
     // Build request with auth header since EventSource doesn't support headers
     // We use fetch with SSE streaming instead
-    const token = window._accessToken;
+    const token = window._accessToken || sessionStorage.getItem('nettrack_token');
     const headers = { 'Content-Type': 'application/json' };
     if (token) headers['Authorization'] = 'Bearer ' + token;
 
