@@ -159,6 +159,17 @@
   .detail-row { border-bottom: 0.5px solid var(--border); padding: 7px 0; display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
   .detail-key { font-size: 12px; color: var(--text2); flex-shrink: 0; }
   .detail-val { font-size: 13px; text-align: right; }
+  /* Discovery queue */
+  .q-new     { background:var(--blue-bg);  color:var(--blue);  font-size:11px; font-weight:600; padding:2px 8px; border-radius:20px; }
+  .q-changed { background:var(--amber-bg); color:var(--amber); font-size:11px; font-weight:600; padding:2px 8px; border-radius:20px; }
+  .q-known   { background:var(--surface2); color:var(--text2);  font-size:11px; font-weight:600; padding:2px 8px; border-radius:20px; }
+  .queue-badge { display:inline-flex; align-items:center; justify-content:center; background:var(--red); color:#fff; border-radius:20px; font-size:10px; font-weight:600; min-width:18px; height:18px; padding:0 4px; margin-left:6px; }
+  .diff-table { width:100%; font-size:12px; border-collapse:collapse; margin-top:8px; }
+  .diff-table td { padding:4px 8px; border-bottom:0.5px solid var(--border); }
+  .diff-table .diff-field { color:var(--text2); font-weight:500; width:80px; }
+  .diff-table .diff-old { color:var(--red); font-family:monospace; }
+  .diff-table .diff-new { color:var(--green); font-family:monospace; }
+
   /* Schedule & alerts panel */
   .schedule-panel { display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-top:1rem; }
   .stat-row { display:flex; justify-content:space-between; align-items:baseline; padding:6px 0; border-bottom:0.5px solid var(--border); font-size:13px; }
@@ -240,6 +251,10 @@
       <button class="nav-item" onclick="showPage('scan')" id="nav-scan">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
         Network scan
+      </button>
+      <button class="nav-item modify-only" style="display:none;" onclick="showPage('queue')" id="nav-queue">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+        Discovery queue<span class="queue-badge" id="queue-badge" style="display:none;">0</span>
       </button>
       <button class="nav-item" onclick="showPage('charts')" id="nav-charts">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
@@ -377,6 +392,42 @@
         </table>
         <div id="vlans-empty" class="empty" style="display:none;">No VLANs defined yet. Add one to get started.</div>
         <div id="vlans-loading" class="empty">Loading...</div>
+      </div>
+    </div>
+
+    <!-- Discovery queue -->
+    <div id="page-queue" style="display:none;">
+      <div class="page-header">
+        <div><div class="page-title">Discovery queue</div></div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn" onclick="bulkAccept('new')">Accept all new</button>
+          <button class="btn" onclick="bulkIgnore('known')">Ignore all known</button>
+          <select id="q-filter-state" onchange="loadQueue()" style="font-size:13px;padding:6px 10px;border:0.5px solid var(--border2);border-radius:var(--radius);background:var(--surface);color:var(--text);">
+            <option value="pending">Pending</option>
+            <option value="">All</option>
+            <option value="accepted">Accepted</option>
+            <option value="ignored">Ignored</option>
+            <option value="blocked">Blocked</option>
+          </select>
+          <select id="q-filter-qstate" onchange="loadQueue()" style="font-size:13px;padding:6px 10px;border:0.5px solid var(--border2);border-radius:var(--radius);background:var(--surface);color:var(--text);">
+            <option value="">All states</option>
+            <option value="new">New</option>
+            <option value="changed">Changed</option>
+            <option value="known">Known</option>
+          </select>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>State</th><th>Hostname</th><th>IP</th><th>MAC</th>
+            <th>Type</th><th>Switch</th><th>Port</th><th>Floor</th><th>VLAN</th>
+            <th>Discovered</th><th></th>
+          </tr></thead>
+          <tbody id="queue-body"></tbody>
+        </table>
+        <div id="queue-empty" class="empty" style="display:none;">Queue is empty.</div>
+        <div id="queue-loading" class="empty">Loading...</div>
       </div>
     </div>
 
@@ -610,6 +661,7 @@ async function initApp() {
   // Show modify-only buttons
   if (currentUser.role === 'modify' || currentUser.role === 'admin') {
     document.querySelectorAll('.modify-only').forEach(el => el.style.display = '');
+    refreshQueueBadge();
   }
 
   // Tags toggle
@@ -1088,7 +1140,7 @@ async function loadAuditLog() {
 }
 
 // ── Page routing ──────────────────────────────────────────────────────────────
-const pages = ['devices','switches','scan','charts','users','audit','floors','vlans'];
+const pages = ['devices','switches','scan','charts','users','audit','floors','vlans','queue'];
 function showPage(name) {
   pages.forEach(p => {
     document.getElementById(`page-${p}`).style.display   = p === name ? '' : 'none';
@@ -1096,6 +1148,7 @@ function showPage(name) {
     if (nav) nav.classList.toggle('active', p === name);
   });
   if (name === 'switches')  loadSwitches();
+  if (name === 'queue')     loadQueue();
   if (name === 'floors')    loadFloors();
   if (name === 'vlans')     loadVlans();
   if (name === 'charts')    renderCharts();
@@ -1503,6 +1556,214 @@ async function testAlert() {
   } else {
     showToast('Test email sent ✓');
   }
+}
+
+// ── Discovery queue ──────────────────────────────────────────────────────────
+let queueItems = [];
+let editingQueueId = null;
+
+async function loadQueue() {
+  document.getElementById('queue-loading').style.display = '';
+  document.getElementById('queue-body').innerHTML = '';
+  const status = document.getElementById('q-filter-state').value;
+  const state  = document.getElementById('q-filter-qstate').value;
+  const params = new URLSearchParams();
+  if (status) params.set('queue_status', status);
+  if (state)  params.set('queue_state',  state);
+  const res = await apiFetch(`/api/queue?${params}`);
+  document.getElementById('queue-loading').style.display = 'none';
+  if (!res || !res.ok) { showToast('Failed to load queue'); return; }
+  queueItems = await res.json();
+  const empty = document.getElementById('queue-empty');
+  const tbody = document.getElementById('queue-body');
+  if (!queueItems.length) { empty.style.display = ''; tbody.innerHTML = ''; return; }
+  empty.style.display = 'none';
+  tbody.innerHTML = queueItems.map(q => {
+    const stateTag = `<span class="q-${q.queue_state}">${q.queue_state}</span>`;
+    const diff = q.diff ? JSON.parse(q.diff) : null;
+    const diffHint = diff
+      ? `<div style="margin-top:4px;font-size:11px;color:var(--amber);">
+           Changed: ${Object.keys(diff).join(', ')}
+         </div>`
+      : '';
+    const isPending = q.queue_status === 'pending';
+    return `<tr>
+      <td>${stateTag}${diffHint}</td>
+      <td><strong style="font-weight:500;">${q.hostname || '—'}</strong></td>
+      <td class="mono">${q.ip || '—'}</td>
+      <td class="mono">${q.mac || '—'}</td>
+      <td><span class="badge badge-type">${q.type || '—'}</span></td>
+      <td class="mono">${q.switch || '—'}</td>
+      <td class="mono">${q.port || '—'}</td>
+      <td style="font-size:12px;">${q.floor || '—'}</td>
+      <td style="font-size:12px;color:var(--text2);">${q.vlan || '—'}</td>
+      <td style="font-size:11px;color:var(--text2);white-space:nowrap;">${q.discovered_at ? new Date(q.discovered_at).toLocaleString() : '—'}</td>
+      <td style="white-space:nowrap;">
+        ${isPending ? `
+          <button class="btn btn-sm" onclick="openQueueItem(${q.id})">Review</button>
+        ` : `<span style="font-size:11px;color:var(--text2);">${q.queue_status}</span>`}
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+async function refreshQueueBadge() {
+  if (!currentUser || (currentUser.role !== 'modify' && currentUser.role !== 'admin')) return;
+  const res = await apiFetch('/api/queue/counts');
+  if (!res || !res.ok) return;
+  const counts = await res.json();
+  const badge  = document.getElementById('queue-badge');
+  const nav    = document.getElementById('nav-queue');
+  if (!badge || !nav) return;
+  if (counts.total_pending > 0) {
+    badge.textContent = counts.total_pending;
+    badge.style.display = '';
+    nav.style.background = '';
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
+function openQueueItem(id) {
+  editingQueueId = id;
+  const q = queueItems.find(x => x.id === id);
+  if (!q) return;
+  const diff = q.diff ? JSON.parse(q.diff) : null;
+  const diffHtml = diff ? `
+    <div style="margin-bottom:12px;">
+      <div style="font-size:12px;font-weight:500;color:var(--amber);margin-bottom:6px;">Changes detected vs inventory:</div>
+      <table class="diff-table">
+        ${Object.entries(diff).map(([field, {old: o, new: n}]) => `
+          <tr>
+            <td class="diff-field">${field}</td>
+            <td class="diff-old">${o ?? '—'}</td>
+            <td style="color:var(--text2);padding:4px;">→</td>
+            <td class="diff-new">${n ?? '—'}</td>
+          </tr>`).join('')}
+      </table>
+    </div>` : '';
+
+  const types  = ['Camera','Access Control','Intercom','Switch','WAP','Server','Printer','Other'];
+  const floorOpts = allFloors.map(f => `<option value="${f.name}" ${q.floor===f.name?'selected':''}>${f.name}${f.building?' — '+f.building:''}</option>`).join('');
+  const vlanOpts  = allVlans.map(v => `<option value="${v.vlan_id}" ${q.vlan==v.vlan_id?'selected':''}>${v.vlan_id}${v.name?' — '+v.name:''}</option>`).join('');
+  const switchOpts= allSwitches.map(s => `<option value="${s.name}" ${q.switch===s.name?'selected':''}>${s.name}</option>`).join('');
+
+  setModal(`
+    <div class="modal-header">
+      <div>
+        <div class="modal-title">Review: ${q.hostname || q.ip || q.mac}</div>
+        <div style="margin-top:4px;"><span class="q-${q.queue_state}">${q.queue_state}</span></div>
+      </div>
+      <button class="close-btn" onclick="closeModal()">×</button>
+    </div>
+    ${diffHtml}
+    <div class="field-row">
+      <div class="field"><label>Hostname</label><input id="qi-hostname" value="${q.hostname||''}"/></div>
+      <div class="field"><label>IP</label><input id="qi-ip" value="${q.ip||''}"/></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>MAC</label><input id="qi-mac" value="${q.mac||''}"/></div>
+      <div class="field"><label>Type</label>
+        <select id="qi-type">${types.map(t=>`<option${q.type===t?' selected':''}>${t}</option>`).join('')}</select>
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Floor</label>
+        <select id="qi-floor"><option value="">— None —</option>${floorOpts}</select>
+      </div>
+      <div class="field"><label>Location</label><input id="qi-location" value="${q.location||''}"/></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Switch</label>
+        <select id="qi-switch"><option value="">— None —</option>${switchOpts}</select>
+      </div>
+      <div class="field"><label>Port</label><input id="qi-port" value="${q.port||''}"/></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>VLAN</label>
+        <select id="qi-vlan"><option value="">— None —</option>${vlanOpts}</select>
+      </div>
+      <div class="field"><label>Status</label>
+        <select id="qi-status">${['Online','Offline','Unknown'].map(s=>`<option${q.status===s?' selected':''}>${s}</option>`).join('')}</select>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
+      <button class="btn primary" onclick="saveAndAccept(${q.id})">Accept</button>
+      <button class="btn" onclick="ignoreQueueItem(${q.id})">Ignore</button>
+      <button class="btn danger" onclick="blockQueueItem(${q.id})">Block MAC</button>
+      <button class="btn" onclick="closeModal()" style="margin-left:auto;">Cancel</button>
+    </div>`);
+}
+
+async function saveAndAccept(id) {
+  // Save edits first, then accept
+  const edits = {
+    hostname: document.getElementById('qi-hostname').value.trim() || null,
+    ip:       document.getElementById('qi-ip').value.trim() || null,
+    mac:      document.getElementById('qi-mac').value.trim() || null,
+    type:     document.getElementById('qi-type').value || null,
+    floor:    document.getElementById('qi-floor').value || null,
+    location: document.getElementById('qi-location').value.trim() || null,
+    switch:   document.getElementById('qi-switch').value || null,
+    port:     document.getElementById('qi-port').value.trim() || null,
+    vlan:     parseInt(document.getElementById('qi-vlan').value) || null,
+    status:   document.getElementById('qi-status').value || null,
+  };
+  const editRes = await apiFetch(`/api/queue/${id}`, { method: 'PUT', body: JSON.stringify(edits) });
+  if (!editRes || !editRes.ok) { showToast('Edit failed'); return; }
+  const acceptRes = await apiFetch(`/api/queue/${id}/accept`, { method: 'POST' });
+  if (!acceptRes || !acceptRes.ok) { showToast('Accept failed'); return; }
+  closeModal();
+  showToast('Device accepted into inventory ✓');
+  await loadDevices();
+  await refreshQueueBadge();
+  loadQueue();
+}
+
+async function ignoreQueueItem(id) {
+  const res = await apiFetch(`/api/queue/${id}/ignore`, { method: 'POST' });
+  if (!res || !res.ok) { showToast('Failed'); return; }
+  closeModal();
+  showToast('Ignored');
+  await refreshQueueBadge();
+  loadQueue();
+}
+
+async function blockQueueItem(id) {
+  if (!confirm('Block this MAC address? It will never appear in the discovery queue again.')) return;
+  const res = await apiFetch(`/api/queue/${id}/block`, { method: 'POST' });
+  if (!res || !res.ok) { showToast('Failed'); return; }
+  closeModal();
+  showToast('MAC blocked');
+  await refreshQueueBadge();
+  loadQueue();
+}
+
+async function bulkAccept(state) {
+  if (!confirm(`Accept all ${state} devices into inventory?`)) return;
+  const res = await apiFetch('/api/queue/bulk-accept', {
+    method: 'POST',
+    body: JSON.stringify({ queue_state: state }),
+  });
+  if (!res || !res.ok) { showToast('Bulk accept failed'); return; }
+  const data = await res.json();
+  showToast(`${data.accepted} device${data.accepted !== 1 ? 's' : ''} accepted`);
+  await loadDevices();
+  await refreshQueueBadge();
+  loadQueue();
+}
+
+async function bulkIgnore(state) {
+  if (!confirm(`Ignore all ${state} devices?`)) return;
+  const res = await apiFetch('/api/queue/bulk-ignore', {
+    method: 'POST',
+    body: JSON.stringify({ queue_state: state }),
+  });
+  if (!res || !res.ok) { showToast('Bulk ignore failed'); return; }
+  const data = await res.json();
+  showToast(`${data.ignored} device${data.ignored !== 1 ? 's' : ''} ignored`);
+  await refreshQueueBadge();
+  loadQueue();
 }
 
 // ── Global reference data ────────────────────────────────────────────────────

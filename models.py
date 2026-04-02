@@ -119,3 +119,30 @@ class Vlan(Base):
     name        = Column(String(64), nullable=True)
     description = Column(Text, nullable=True)
     created_at  = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class DiscoveryQueue(Base):
+    __tablename__ = "discovery_queue"
+
+    id            = Column(Integer, primary_key=True, index=True)
+    # Discovered data
+    hostname      = Column(String(255), nullable=True)
+    ip            = Column(String(45),  nullable=True)
+    mac           = Column(String(17),  nullable=True, index=True)
+    type          = Column(String(64),  nullable=True)
+    status        = Column(String(32),  nullable=True)
+    floor         = Column(String(16),  nullable=True)
+    location      = Column(String(255), nullable=True)
+    switch        = Column(String(64),  nullable=True)
+    port          = Column(String(32),  nullable=True)
+    vlan          = Column(Integer,     nullable=True)
+    notes         = Column(Text,        nullable=True)
+    # Queue metadata
+    queue_state   = Column(String(16),  nullable=False, index=True)  # new|changed|known
+    queue_status  = Column(String(16),  nullable=False, default="pending", index=True)  # pending|accepted|ignored|blocked
+    diff          = Column(Text,        nullable=True)   # JSON diff for changed devices
+    scan_id       = Column(String(64),  nullable=True)   # ties items to a specific scan run
+    existing_id   = Column(Integer,     nullable=True)   # device.id if already in inventory
+    discovered_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    reviewed_at   = Column(DateTime(timezone=True), nullable=True)
+    reviewed_by   = Column(Integer,     ForeignKey("users.id", ondelete="SET NULL"), nullable=True)

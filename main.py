@@ -15,6 +15,7 @@ from routers import users, audit
 from routers import scanner as scanner_router
 from routers import schedule as schedule_router
 from routers import floors as floors_router
+from routers import queue as queue_router
 from routers import vlans as vlans_router
 import oidc
 from scanner.scheduler import start_scheduler, stop_scheduler
@@ -86,6 +87,7 @@ app.include_router(oidc.router)
 app.include_router(scanner_router.router)
 app.include_router(schedule_router.router)
 app.include_router(floors_router.router)
+app.include_router(queue_router.router)
 app.include_router(vlans_router.router)
 
 

@@ -471,22 +471,33 @@ def save_results(results: list[dict], results_dir: str) -> str:
     return filepath
 
 
-def post_results(results: list[dict], api_url: str, token: str) -> bool:
-    """POST discovered devices to the NetTrack bulk-upsert endpoint."""
+def post_results(results: list[dict], api_url: str, token: str,
+                  scan_id: str = None) -> bool:
+    """POST discovered devices to the discovery queue endpoint."""
     try:
+        import uuid as _uuid
         headers = {'Content-Type': 'application/json'}
         if token:
             headers['Authorization'] = f'Bearer {token}'
+        payload = {
+            'devices': results,
+            'scan_id': scan_id or str(_uuid.uuid4())[:8],
+        }
         res = requests.post(
-            f'{api_url.rstrip("/")}/api/devices/bulk-upsert',
-            json={'devices': results},
+            f'{api_url.rstrip("/")}/api/queue/ingest',
+            json=payload,
             headers=headers,
             timeout=30,
         )
         res.raise_for_status()
         data = res.json()
-        log.info(f'Bulk upsert: {data["created"]} created, {data["updated"]} updated')
+        log.info(
+            f'Queue ingest: {data.get("new",0)} new, '
+            f'{data.get("changed",0)} changed, '
+            f'{data.get("known",0)} known, '
+            f'{data.get("blocked",0)} blocked'
+        )
         return True
     except Exception as e:
-        log.error(f'Failed to POST results to API: {e}')
+        log.error(f'Failed to POST results to queue: {e}')
         return False
