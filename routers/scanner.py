@@ -45,53 +45,61 @@ class ScanStatus(BaseModel):
 
 
 @router.get('/config')
-def get_scan_config(_: models.User = Depends(auth.require_role('read_only'))):
-    """Return current scanner config (subnets + tuning) for the UI."""
-    config = load_config()
+def get_scan_config(
+    _: models.User = Depends(auth.require_role('read_only')),
+    db: Session = Depends(get_db),
+):
+    """Return scan config from database."""
+    row = db.query(models.ScanConfig).filter(models.ScanConfig.id == 1).first()
+    if not row:
+        row = models.ScanConfig(id=1)
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+    subnets = json.loads(row.subnets) if row.subnets else []
     return {
-        'subnets':         [{'cidr': s.cidr, 'description': s.description} for s in config.subnets],
-        'snmp_community':  os.environ.get('SNMP_COMMUNITY', 'public'),
-        'ping_timeout_ms': config.ping_timeout_ms,
-        'ping_workers':    config.ping_workers,
-        'snmp_timeout':    config.snmp_timeout,
-        'snmp_retries':    config.snmp_retries,
-        'snmp_port':       config.snmp_port,
+        'subnets':         subnets,
+        'snmp_community':  row.snmp_community or 'public',
+        'snmp_port':       row.snmp_port       or 161,
+        'snmp_timeout':    row.snmp_timeout     or 2,
+        'snmp_retries':    row.snmp_retries     or 1,
+        'ping_timeout_ms': row.ping_timeout_ms  or 800,
+        'ping_workers':    row.ping_workers      or 64,
     }
 
 
-@router.put('/config', status_code=204)
+@router.put('/config', status_code=200)
 def save_scan_config(
     payload: dict,
     current_user: models.User = Depends(auth.require_role('modify')),
+    db: Session = Depends(get_db),
 ):
-    """Save scanner config (subnets + tuning) to config.yaml."""
-    from scanner.config import CONFIG_PATH
-    import os
+    """Save scan config to database — persists through deployments."""
+    row = db.query(models.ScanConfig).filter(models.ScanConfig.id == 1).first()
+    if not row:
+        row = models.ScanConfig(id=1)
+        db.add(row)
 
-    # Load existing config to preserve any fields we don't manage
-    existing = {}
-    if os.path.exists(CONFIG_PATH):
-        with open(CONFIG_PATH) as f:
-            existing = yaml.safe_load(f) or {}
-
-    # Update only the fields the UI manages
     if 'subnets' in payload:
-        existing['subnets'] = payload['subnets']
-    for field in ['ping_timeout_ms', 'ping_workers', 'snmp_timeout', 'snmp_retries', 'snmp_port']:
-        if field in payload:
-            existing[field] = payload[field]
+        row.subnets = json.dumps(payload['subnets'])
+    if 'snmp_community'  in payload: row.snmp_community  = payload['snmp_community']
+    if 'snmp_port'       in payload: row.snmp_port        = int(payload['snmp_port'])
+    if 'snmp_timeout'    in payload: row.snmp_timeout     = int(payload['snmp_timeout'])
+    if 'snmp_retries'    in payload: row.snmp_retries     = int(payload['snmp_retries'])
+    if 'ping_timeout_ms' in payload: row.ping_timeout_ms  = int(payload['ping_timeout_ms'])
+    if 'ping_workers'    in payload: row.ping_workers      = int(payload['ping_workers'])
 
-    os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
-    with open(CONFIG_PATH, 'w') as f:
-        yaml.dump(existing, f, default_flow_style=False, sort_keys=False)
-
-    # Config saved successfully
+    db.commit()
+    auth.log_action(db, current_user.id, "update_scan_config", "scanner", None,
+                    f"{len(payload.get('subnets', []))} subnets")
+    return {'saved': True}
 
 
 @router.post('/trigger')
 def trigger_scan(
     request: ScanRequest,
     current_user: models.User = Depends(auth.require_role('modify')),
+    db: Session = Depends(get_db),
 ):
     """
     Start a network scan and stream live log output as Server-Sent Events.
@@ -108,6 +116,30 @@ def trigger_scan(
         raise HTTPException(status_code=409, detail='A scan is already in progress')
 
     config = load_config()
+
+    # Load DB-stored scan config (subnets + tuning saved by user in UI)
+    try:
+        db_cfg = db.query(models.ScanConfig).filter(models.ScanConfig.id == 1).first()
+        if db_cfg:
+            if db_cfg.subnets:
+                db_subnets = json.loads(db_cfg.subnets)
+                if db_subnets:
+                    from scanner.config import SubnetConfig as SC
+                    config.subnets = [SC(cidr=s['cidr'], description=s.get('description',''))
+                                      for s in db_subnets if s.get('cidr')]
+            if db_cfg.snmp_community:  config.snmp_community  = db_cfg.snmp_community
+            if db_cfg.snmp_port:       config.snmp_port        = db_cfg.snmp_port
+            if db_cfg.snmp_timeout:    config.snmp_timeout     = db_cfg.snmp_timeout
+            if db_cfg.snmp_retries:    config.snmp_retries     = db_cfg.snmp_retries
+            if db_cfg.ping_timeout_ms: config.ping_timeout_ms  = db_cfg.ping_timeout_ms
+            if db_cfg.ping_workers:    config.ping_workers      = db_cfg.ping_workers
+    except Exception as e:
+        log.warning(f"Could not load DB scan config: {e}")
+
+    # Request-level overrides (manual scan page can override subnets/community)
+    if request.subnets:
+        from scanner.config import SubnetConfig as SC
+        config.subnets = [SC(cidr=s) for s in request.subnets]
     if request.snmp_community:
         config.snmp_community = request.snmp_community
 

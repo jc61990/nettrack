@@ -146,3 +146,21 @@ class DiscoveryQueue(Base):
     discovered_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     reviewed_at   = Column(DateTime(timezone=True), nullable=True)
     reviewed_by   = Column(Integer,     ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+
+class ScanConfig(Base):
+    """
+    Persistent scan configuration stored in the database.
+    Singleton row (id=1). Survives deployments unlike config.yaml.
+    """
+    __tablename__ = "scan_config"
+
+    id              = Column(Integer, primary_key=True, default=1)
+    subnets         = Column(Text,    nullable=True)   # JSON array of {cidr, description}
+    snmp_community  = Column(String(128), nullable=True, default="public")
+    snmp_port       = Column(Integer, nullable=True, default=161)
+    snmp_timeout    = Column(Integer, nullable=True, default=2)
+    snmp_retries    = Column(Integer, nullable=True, default=1)
+    ping_timeout_ms = Column(Integer, nullable=True, default=800)
+    ping_workers    = Column(Integer, nullable=True, default=64)
+    updated_at      = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

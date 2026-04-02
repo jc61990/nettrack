@@ -40,8 +40,29 @@ def run_scheduled_scan():
     start = time.time()
 
     try:
-        config    = load_config()
-        scanner   = NetworkScanner(config)
+        config = load_config()
+
+        # Load DB-stored scan config so scheduled scans use saved subnets
+        try:
+            import json as _json
+            from scanner.config import SubnetConfig
+            db_cfg = db.query(models.ScanConfig).filter(models.ScanConfig.id == 1).first()
+            if db_cfg:
+                if db_cfg.subnets:
+                    db_subnets = _json.loads(db_cfg.subnets)
+                    if db_subnets:
+                        config.subnets = [SubnetConfig(cidr=s['cidr'], description=s.get('description',''))
+                                          for s in db_subnets if s.get('cidr')]
+                if db_cfg.snmp_community:  config.snmp_community  = db_cfg.snmp_community
+                if db_cfg.snmp_port:       config.snmp_port        = db_cfg.snmp_port
+                if db_cfg.snmp_timeout:    config.snmp_timeout     = db_cfg.snmp_timeout
+                if db_cfg.snmp_retries:    config.snmp_retries     = db_cfg.snmp_retries
+                if db_cfg.ping_timeout_ms: config.ping_timeout_ms  = db_cfg.ping_timeout_ms
+                if db_cfg.ping_workers:    config.ping_workers      = db_cfg.ping_workers
+        except Exception as e:
+            log.warning(f"Could not load DB scan config for scheduled scan: {e}")
+
+        scanner = NetworkScanner(config)
         log.info("Scheduled scan starting...")
 
         # Snapshot current device statuses before scan
