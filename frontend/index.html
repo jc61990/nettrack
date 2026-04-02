@@ -68,7 +68,8 @@
   .nav-section { font-size: 10px; font-weight: 600; color: var(--text3); letter-spacing: 0.08em; text-transform: uppercase; padding: 0.75rem 1.25rem 0.25rem; }
   .nav-item { display: flex; align-items: center; gap: 10px; padding: 8px 1.25rem; font-size: 13px; color: var(--text2); cursor: pointer; border-radius: 0; transition: all 0.1s; border: none; background: none; width: 100%; text-align: left; }
   .nav-item:hover { background: var(--surface2); color: var(--text); }
-  .nav-item.active { background: var(--surface2); color: var(--text); font-weight: 500; }
+  .nav-item.active { background: var(--surface2); color: var(--text); font-weight: 500; border-left: 2px solid #4a8fd4; padding-left: calc(1.25rem - 2px); }
+  :root:not([data-theme="dark"]) .nav-item.active { border-left-color: #185FA5; }
   .nav-item svg { width: 15px; height: 15px; flex-shrink: 0; opacity: 0.6; }
   .nav-item.active svg { opacity: 1; }
   .sidebar-user { padding: 1rem 1.25rem; border-top: 0.5px solid var(--border); }
@@ -100,8 +101,14 @@
   .btn { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; padding: 7px 14px; border: 0.5px solid var(--border2); border-radius: var(--radius); background: var(--surface); color: var(--text); cursor: pointer; font-family: inherit; transition: all 0.1s; white-space: nowrap; }
   .btn:hover { background: var(--surface2); }
   .btn:active { transform: scale(0.98); }
-  .btn.primary { background: var(--accent); color: #fff; border-color: transparent; }
-  .btn.primary:hover { opacity: 0.88; }
+  .btn.primary { background: #185FA5; color: #fff; border-color: transparent; }
+  .btn.primary:hover { background: #1a6db8; }
+  :root[data-theme="dark"] .btn.primary { background: #4a8fd4; color: #0f0f0e; }
+  :root[data-theme="dark"] .btn.primary:hover { background: #5a9fe4; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .btn.primary { background: #4a8fd4; color: #0f0f0e; }
+    :root:not([data-theme="light"]) .btn.primary:hover { background: #5a9fe4; }
+  }
   .btn.danger { color: var(--red); border-color: var(--red); }
   .btn.danger:hover { background: var(--red-bg); }
   .btn.full { width: 100%; justify-content: center; }
