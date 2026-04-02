@@ -143,13 +143,18 @@ def create_user(
     ).first():
         raise HTTPException(status_code=409, detail="Email already registered")
 
+    try:
+        pw_hash = auth.hash_password(payload.password) if payload.password else None
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
     user = models.User(
         email=payload.email.lower(),
         full_name=payload.full_name,
         role=payload.role,
         auth_provider="local",
         is_active=True,
-        password_hash=auth.hash_password(payload.password) if payload.password else None,
+        password_hash=pw_hash,
     )
     db.add(user)
     db.commit()
@@ -180,7 +185,10 @@ def update_user(
         user.is_active = payload.is_active
         changes.append(f"is_active={payload.is_active}")
     if payload.password:
-        user.password_hash = auth.hash_password(payload.password)
+        try:
+            user.password_hash = auth.hash_password(payload.password)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
         user.refresh_token = None   # invalidate existing sessions
         changes.append("password_reset")
 

@@ -505,7 +505,15 @@ async function doLogin() {
     });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
-      err.textContent = data.detail || 'Login failed';
+      if (res.status === 401) {
+        err.textContent = 'Incorrect email or password.';
+      } else if (res.status === 403) {
+        err.textContent = 'Your account has been disabled. Contact your administrator.';
+      } else if (res.status === 429) {
+        err.textContent = 'Too many login attempts. Please wait a minute and try again.';
+      } else {
+        err.textContent = data.detail || 'Login failed. Please try again.';
+      }
       err.style.display = '';
     } else {
       const data = await res.json().catch(() => ({}));
@@ -513,7 +521,7 @@ async function doLogin() {
       await initApp();
     }
   } catch(e) {
-    err.textContent = 'Could not reach server. Check API_URL configuration.';
+    err.textContent = 'Could not reach the server. Check your network connection.';
     err.style.display = '';
   } finally {
     btn.textContent = 'Sign in';
@@ -943,7 +951,11 @@ function showUserForm(u) {
         </select>
       </div>
     </div>
-    <div class="field"><label>${editingUserId ? 'New password (leave blank to keep)' : 'Password'}</label><input id="uf-password" type="password" placeholder="••••••••"/></div>
+    <div class="field">
+          <label>${editingUserId ? 'New password (leave blank to keep)' : 'Password'}</label>
+          <input id="uf-password" type="password" placeholder="Min 12 characters" oninput="validatePasswordField(this)"/>
+          <div id="uf-password-hint" style="font-size:11px;margin-top:3px;display:none;"></div>
+        </div>
     <div style="display:flex;gap:8px;margin-top:4px;">
       <button class="btn primary" onclick="saveUser()">Save</button>
       <button class="btn" onclick="closeModal()">Cancel</button>
@@ -1448,6 +1460,23 @@ async function loadScanStatus() {
 document.addEventListener('keydown', e => {
   if (e.key === 'Enter' && document.getElementById('login-screen').style.display !== 'none') doLogin();
 });
+
+// ── Password field validation ────────────────────────────────────────────────
+function validatePasswordField(input) {
+  const hint = document.getElementById('uf-password-hint');
+  if (!hint) return;
+  const val = input.value;
+  if (!val) { hint.style.display = 'none'; return; }
+  if (val.length < 12) {
+    hint.textContent = 'Password must be at least 12 characters (' + val.length + '/12)';
+    hint.style.color = 'var(--amber)';
+    hint.style.display = '';
+  } else {
+    hint.textContent = 'Password length OK ✓';
+    hint.style.color = 'var(--green)';
+    hint.style.display = '';
+  }
+}
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 // Try to restore session via HttpOnly cookie. If valid, go straight into app.
