@@ -38,7 +38,7 @@ fi
 
 # ── 2. System packages via DNF5 ───────────────────────────────────────────────
 info "Installing system packages..."
-dnf install -y \
+dnf install -y --skip-unavailable \
     python3 python3-pip python3-devel \
     postgresql postgresql-server postgresql-devel \
     python3-sqlalchemy \
