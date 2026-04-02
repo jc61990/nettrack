@@ -113,6 +113,17 @@ def _auto_map(headers: List[str]) -> Dict[str, Optional[str]]:
     return mapping
 
 
+def _normalize_mac(val: str) -> Optional[str]:
+    """Normalize MAC address to XX:XX:XX:XX:XX format from any common notation."""
+    if not val:
+        return None
+    # Strip all separators and spaces
+    raw = re.sub(r'[.:\s-]', '', val.strip().upper())
+    if len(raw) != 12 or not re.match(r'^[0-9A-F]+$', raw):
+        return val  # Return as-is if can't parse — let DB truncation catch it
+    return ':'.join(raw[i:i+2] for i in range(0, 12, 2))
+
+
 def _normalize_type(val: str) -> str:
     if not val:
         return "Other"
@@ -289,6 +300,10 @@ async def confirm_import(
                 db.flush()
                 existing_vlans[vlan_id] = new_vlan
                 created_vlans.append(vlan_id)
+
+        # Normalize MAC address format
+        if device.get('mac'):
+            device['mac'] = _normalize_mac(device['mac'])
 
         # Skip blocked MACs
         mac = device.get('mac') or None
