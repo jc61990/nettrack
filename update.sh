@@ -30,8 +30,7 @@ git fetch origin
 CHANGES=$(git log HEAD..origin/main --oneline 2>/dev/null | wc -l)
 
 if [[ "${CHANGES}" -eq 0 ]]; then
-    warn "Already up to date — nothing to do."
-    exit 0
+    warn "Already up to date — no new commits. Running deploy steps anyway..."
 fi
 
 info "$(git log HEAD..origin/main --oneline)"
