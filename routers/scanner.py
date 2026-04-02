@@ -19,6 +19,8 @@ from pydantic import BaseModel
 import auth
 import models
 from scanner.config import load_config
+import yaml
+import os
 from scanner.scanner import NetworkScanner, save_results, post_results, check_ping_capability
 
 router = APIRouter(prefix='/api/scan', tags=['Scanner'])
@@ -40,6 +42,50 @@ class ScanStatus(BaseModel):
     last_scan:    Optional[dict] = None
     ping_method:  Optional[str] = None
     ping_warning: Optional[str] = None
+
+
+@router.get('/config')
+def get_scan_config(_: models.User = Depends(auth.require_role('read_only'))):
+    """Return current scanner config (subnets + tuning) for the UI."""
+    config = load_config()
+    return {
+        'subnets':         [{'cidr': s.cidr, 'description': s.description} for s in config.subnets],
+        'snmp_community':  os.environ.get('SNMP_COMMUNITY', 'public'),
+        'ping_timeout_ms': config.ping_timeout_ms,
+        'ping_workers':    config.ping_workers,
+        'snmp_timeout':    config.snmp_timeout,
+        'snmp_retries':    config.snmp_retries,
+        'snmp_port':       config.snmp_port,
+    }
+
+
+@router.put('/config', status_code=204)
+def save_scan_config(
+    payload: dict,
+    current_user: models.User = Depends(auth.require_role('modify')),
+):
+    """Save scanner config (subnets + tuning) to config.yaml."""
+    from scanner.config import CONFIG_PATH
+    import os
+
+    # Load existing config to preserve any fields we don't manage
+    existing = {}
+    if os.path.exists(CONFIG_PATH):
+        with open(CONFIG_PATH) as f:
+            existing = yaml.safe_load(f) or {}
+
+    # Update only the fields the UI manages
+    if 'subnets' in payload:
+        existing['subnets'] = payload['subnets']
+    for field in ['ping_timeout_ms', 'ping_workers', 'snmp_timeout', 'snmp_retries', 'snmp_port']:
+        if field in payload:
+            existing[field] = payload[field]
+
+    os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
+    with open(CONFIG_PATH, 'w') as f:
+        yaml.dump(existing, f, default_flow_style=False, sort_keys=False)
+
+    # Config saved successfully
 
 
 @router.post('/trigger')

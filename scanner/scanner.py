@@ -235,7 +235,7 @@ class NetworkScanner:
         self.config = config or load_config()
 
     def _snmp_client(self, ip: str, subnet_cfg: SubnetConfig) -> SNMPClient:
-        v3 = subnet_cfg.snmp_v3 or self.config.snmp_v3
+        v3 = self.config.snmp_v3   # v3 creds always come from global config/env
         return SNMPClient(
             host=ip,
             port=self.config.snmp_port,
@@ -450,7 +450,7 @@ class NetworkScanner:
 
     def _default_subnet(self, cidr: str):
         from scanner.config import SubnetConfig
-        return SubnetConfig(cidr=cidr, snmp_community=self.config.snmp_community, snmp_v3=self.config.snmp_v3)
+        return SubnetConfig(cidr=cidr, snmp_community=self.config.snmp_community)
 
     def _find_subnet_cfg(self, ip: str, subnet_map: dict):
         addr = ipaddress.ip_address(ip)
