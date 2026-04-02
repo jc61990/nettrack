@@ -18,8 +18,6 @@ from pydantic import BaseModel
 
 import auth
 import models
-from sqlalchemy.orm import Session
-from database import get_db
 from scanner.config import load_config
 import yaml
 import os
