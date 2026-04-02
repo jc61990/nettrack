@@ -105,6 +105,15 @@ class BulkActionRequest(BaseModel):
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+def _clean(val):
+    # Return None for empty/blank strings to avoid unique constraint violations.
+    if val is None:
+        return None
+    if isinstance(val, str) and not val.strip():
+        return None
+    return val
+
+
 def _compute_diff(existing: models.Device, incoming: dict) -> dict:
     """Return dict of {field: {old, new}} for fields that changed."""
     diff = {}
@@ -124,15 +133,16 @@ def _apply_to_inventory(item: models.DiscoveryQueue, db: Session,
             device = db.query(models.Device).filter(models.Device.id == item.existing_id).first()
             if device:
                 for f in DEVICE_FIELDS:
-                    val = getattr(item, f)
+                    val = _clean(getattr(item, f))
                     if val is not None:
                         setattr(device, f, val)
                 db.commit()
                 db.refresh(device)
                 return device
 
-        # New device — only set non-None fields
-        fields = {f: getattr(item, f) for f in DEVICE_FIELDS if getattr(item, f) is not None}
+        # New device — clean empty strings to None, skip None fields
+        fields = {f: _clean(getattr(item, f)) for f in DEVICE_FIELDS}
+        fields = {k: v for k, v in fields.items() if v is not None}
         device = models.Device(**fields)
         db.add(device)
         db.commit()
@@ -219,8 +229,10 @@ def ingest(
             q = q.filter(models.DiscoveryQueue.ip == item.ip)
         q.delete()
 
+        # Clean empty strings to None before storing
+        cleaned = {k: (v if v != '' else None) for k, v in incoming.items()}
         entry = models.DiscoveryQueue(
-            **incoming,
+            **cleaned,
             queue_state=state,
             queue_status='pending',
             diff=diff,
