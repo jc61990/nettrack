@@ -528,7 +528,9 @@
       <div class="page-header">
         <div><div class="page-title">Discovery queue</div></div>
         <div style="display:flex;gap:8px;">
+          <button class="btn" onclick="bulkAccept('')">Accept all pending</button>
           <button class="btn" onclick="bulkAccept('new')">Accept all new</button>
+          <button class="btn" onclick="bulkAccept('changed')">Accept all changed</button>
           <button class="btn" onclick="bulkIgnore('known')">Ignore all known</button>
           <select id="q-filter-state" onchange="loadQueue()" style="font-size:13px;padding:6px 10px;border:0.5px solid var(--border2);border-radius:var(--radius);background:var(--surface);color:var(--text);">
             <option value="pending">Pending</option>
@@ -2077,7 +2079,7 @@ async function bulkAccept(state) {
 
   const res = await apiFetch('/api/queue/bulk-accept', {
     method: 'POST',
-    body: JSON.stringify({ queue_state: state }),
+    body: JSON.stringify(state ? { queue_state: state } : {}),
   });
 
   if (btn) { btn.disabled = false; btn.textContent = origText; }
