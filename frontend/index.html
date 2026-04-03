@@ -2066,14 +2066,27 @@ async function blockQueueItem(id) {
 }
 
 async function bulkAccept(state) {
-  if (!confirm(`Accept all ${state} devices into inventory?`)) return;
+  const label = state ? `all ${state}` : 'all pending';
+  if (!confirm(`Accept ${label} devices into inventory? This may take a moment for large queues.`)) return;
+
+  // Show loading state on button
+  const btn = document.querySelector(`button[onclick="bulkAccept('${state}')"]`);
+  const origText = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Accepting...'; }
+  showToast('Processing — please wait...');
+
   const res = await apiFetch('/api/queue/bulk-accept', {
     method: 'POST',
     body: JSON.stringify({ queue_state: state }),
   });
+
+  if (btn) { btn.disabled = false; btn.textContent = origText; }
+
   if (!res || !res.ok) { showToast('Bulk accept failed'); return; }
   const data = await res.json();
-  showToast(`${data.accepted} device${data.accepted !== 1 ? 's' : ''} accepted`);
+  let msg = `${data.accepted} device${data.accepted !== 1 ? 's' : ''} accepted ✓`;
+  if (data.errors > 0) msg += ` (${data.errors} errors — check notes)`;
+  showToast(msg);
   await loadDevices();
   await refreshQueueBadge();
   loadQueue();

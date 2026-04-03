@@ -392,20 +392,46 @@ def bulk_accept(
         models.DiscoveryQueue.queue_status == 'pending'
     )
     q = _filter_query(q, payload)
-    items   = q.all()
-    count   = 0
-    now     = datetime.now(timezone.utc)
-    for item in items:
-        overwrite = item.queue_state == 'changed'
-        _apply_to_inventory(item, db, current_user.id, overwrite=overwrite)
-        item.queue_status = 'accepted'
-        item.reviewed_at  = now
-        item.reviewed_by  = current_user.id
-        count += 1
-    db.commit()
+    # Get IDs only to avoid loading everything into memory at once
+    item_ids = [row.id for row in q.with_entities(models.DiscoveryQueue.id).all()]
+
+    count    = 0
+    errors   = 0
+    now      = datetime.now(timezone.utc)
+    batch_size = 50
+
+    for i in range(0, len(item_ids), batch_size):
+        batch_ids = item_ids[i:i + batch_size]
+        items = db.query(models.DiscoveryQueue).filter(
+            models.DiscoveryQueue.id.in_(batch_ids)
+        ).all()
+        for item in items:
+            try:
+                overwrite = item.queue_state == 'changed'
+                _apply_to_inventory(item, db, current_user.id, overwrite=overwrite)
+                item.queue_status = 'accepted'
+                item.reviewed_at  = now
+                item.reviewed_by  = current_user.id
+                count += 1
+            except Exception as e:
+                db.rollback()
+                errors += 1
+                # Re-fetch item after rollback and mark it so it doesn't block
+                try:
+                    item = db.query(models.DiscoveryQueue).filter(
+                        models.DiscoveryQueue.id == item.id
+                    ).first()
+                    if item:
+                        item.notes = f"Bulk accept error: {str(e)[:100]}"
+                        db.commit()
+                except Exception:
+                    pass
+                continue
+        db.commit()
+
     auth.log_action(db, current_user.id, "bulk_accept", "queue", None,
-                    f"{count} devices accepted")
-    return {'accepted': count}
+                    f"{count} devices accepted, {errors} errors")
+    return {'accepted': count, 'errors': errors}
 
 
 @router.post("/bulk-ignore")
