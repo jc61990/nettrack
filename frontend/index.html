@@ -2644,6 +2644,8 @@ function showImportStep3(result) {
     summary += `<br>Created ${result.created_floors.length} new floor(s): ${result.created_floors.join(', ')}.`;
   if (result.created_vlans?.length)
     summary += `<br>Created ${result.created_vlans.length} new VLAN(s): ${result.created_vlans.join(', ')}.`;
+  if (result.created_switches?.length)
+    summary += `<br>Created ${result.created_switches.length} new switch(es): ${result.created_switches.slice(0,5).join(', ')}${result.created_switches.length > 5 ? '...' : ''}.`;
 
   document.getElementById('import-result-summary').innerHTML = summary;
 }

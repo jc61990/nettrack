@@ -228,14 +228,16 @@ async def confirm_import(
     overrides = payload.overrides or {}
     scan_id   = f"import_{str(_uuid.uuid4())[:6]}"
 
-    # Load existing floors and VLANs
-    existing_floors = {f.name.lower(): f for f in db.query(models.Floor).all()}
-    existing_vlans  = {v.vlan_id: v for v in db.query(models.Vlan).all()}
+    # Load existing floors, VLANs, and switches
+    existing_floors   = {f.name.lower(): f for f in db.query(models.Floor).all()}
+    existing_vlans    = {v.vlan_id: v for v in db.query(models.Vlan).all()}
+    existing_switches = {s.name.lower(): s for s in db.query(models.Switch).all()}
 
-    created_floors: List[str] = []
-    created_vlans:  List[int] = []
-    skipped:        List[int] = []
-    queued:         int = 0
+    created_floors:   List[str] = []
+    created_vlans:    List[int] = []
+    created_switches: List[str] = []
+    skipped:          List[int] = []
+    queued:           int = 0
 
     # Load blocked MACs
     blocked = {
@@ -300,6 +302,21 @@ async def confirm_import(
                 db.flush()
                 existing_vlans[vlan_id] = new_vlan
                 created_vlans.append(vlan_id)
+
+        # Auto-create switch if it doesn't exist
+        if 'switch' in device and device['switch']:
+            sw_key = device['switch'].lower()
+            if sw_key not in existing_switches:
+                # Try to carry over floor if we have it
+                sw_floor = device.get('floor')
+                new_sw = models.Switch(
+                    name=device['switch'],
+                    floor=sw_floor,
+                )
+                db.add(new_sw)
+                db.flush()
+                existing_switches[sw_key] = new_sw
+                created_switches.append(device['switch'])
 
         # Normalize MAC address format
         if device.get('mac'):
@@ -376,13 +393,15 @@ async def confirm_import(
 
     auth.log_action(db, current_user.id, "import", "queue", None,
                     f"import={scan_id} queued={queued} skipped={len(skipped)} "
-                    f"floors_created={len(created_floors)} vlans_created={len(created_vlans)}")
+                    f"floors_created={len(created_floors)} vlans_created={len(created_vlans)} "
+                    f"switches_created={len(created_switches)}")
 
     return {
-        "queued":          queued,
-        "skipped":         len(skipped),
-        "skipped_rows":    skipped,
-        "created_floors":  created_floors,
-        "created_vlans":   created_vlans,
-        "scan_id":         scan_id,
+        "queued":            queued,
+        "skipped":           len(skipped),
+        "skipped_rows":      skipped,
+        "created_floors":    created_floors,
+        "created_vlans":     created_vlans,
+        "created_switches":  created_switches,
+        "scan_id":           scan_id,
     }
