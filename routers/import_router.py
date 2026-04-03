@@ -144,12 +144,7 @@ def _normalize_status(val: str) -> str:
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
 
-class PreviewResponse(BaseModel):
-    headers:     List[str]
-    mapping:     Dict[str, Optional[str]]
-    sample_rows: List[Dict[str, Any]]
-    total_rows:  int
-    all_rows:    List[Dict[str, Any]]   # full data for confirm step
+
 
 
 class ConfirmRequest(BaseModel):
@@ -162,9 +157,20 @@ class ConfirmRequest(BaseModel):
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
-@router.post("/preview", response_model=PreviewResponse)
+class PreviewResponse(BaseModel):
+    headers:     List[str]
+    mapping:     Dict[str, Optional[str]]
+    sample_rows: List[Dict[str, Any]]
+    total_rows:  int
+    all_rows:    List[Dict[str, Any]]
+    sheet_names: List[str] = []
+    active_sheet: str = ""
+
+
+@router.post("/preview")
 async def preview_import(
     file: UploadFile = File(...),
+    sheet_name: Optional[str] = None,
     _: models.User = Depends(auth.require_role("modify")),
 ):
     """Upload an Excel file and get back header mapping suggestions."""
@@ -173,23 +179,35 @@ async def preview_import(
                             detail="Only .xlsx, .xls, and .csv files are supported")
     try:
         import openpyxl
-        content = await file.read()
+        file_content = await file.read()
 
         if file.filename.endswith('.csv'):
             import csv as _csv
-            text    = content.decode('utf-8-sig', errors='replace')
+            text    = file_content.decode('utf-8-sig', errors='replace')
             reader  = _csv.DictReader(io.StringIO(text))
-            headers = reader.fieldnames or []
+            headers = list(reader.fieldnames or [])
             rows    = [dict(r) for r in reader]
+            sheet_names  = []
+            active_sheet = ""
         else:
-            wb   = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
-            ws   = wb.active
+            wb = openpyxl.load_workbook(io.BytesIO(file_content), data_only=True)
+            sheet_names = wb.sheetnames
+
+            # Use requested sheet or active sheet
+            if sheet_name and sheet_name in sheet_names:
+                ws = wb[sheet_name]
+            else:
+                ws = wb.active
+                sheet_name = ws.title
+
+            active_sheet = sheet_name
+
             data = list(ws.iter_rows(values_only=True))
             if not data:
-                raise HTTPException(status_code=400, detail="Spreadsheet is empty")
+                raise HTTPException(status_code=400, detail="Selected sheet is empty")
             headers = [str(h).strip() if h is not None else f"Column_{i}"
                        for i, h in enumerate(data[0])]
-            rows    = [
+            rows = [
                 {headers[i]: (str(cell).strip() if cell is not None else "")
                  for i, cell in enumerate(row)}
                 for row in data[1:]
@@ -199,13 +217,15 @@ async def preview_import(
         mapping     = _auto_map(headers)
         sample_rows = rows[:5]
 
-        return PreviewResponse(
-            headers=headers,
-            mapping=mapping,
-            sample_rows=sample_rows,
-            total_rows=len(rows),
-            all_rows=rows,
-        )
+        return {
+            "headers":      headers,
+            "mapping":      mapping,
+            "sample_rows":  sample_rows,
+            "total_rows":   len(rows),
+            "all_rows":     rows,
+            "sheet_names":  sheet_names,
+            "active_sheet": active_sheet,
+        }
     except HTTPException:
         raise
     except Exception as e:

@@ -462,6 +462,10 @@
           </div>
           <input type="file" id="import-file-input" accept=".xlsx,.xls,.csv" style="display:none;" onchange="handleImportFile(this)"/>
           <div id="import-file-info" style="display:none;margin-top:12px;font-size:13px;color:var(--text2);"></div>
+          <div id="import-sheet-picker" style="display:none;margin-top:12px;">
+            <label style="font-size:13px;font-weight:500;">Select sheet to import:</label>
+            <div id="import-sheet-list" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;"></div>
+          </div>
         </div>
       </div>
 
@@ -2444,14 +2448,15 @@ function handleImportFile(input) {
   if (file) processImportFile(file);
 }
 
-async function processImportFile(file) {
+async function processImportFile(file, sheetName) {
   _importFile = file;
   const info = document.getElementById('import-file-info');
   info.style.display = '';
-  info.textContent = `Reading ${file.name}...`;
+  info.textContent = `Reading ${file.name}${sheetName ? ' — ' + sheetName : ''}...`;
 
   const formData = new FormData();
   formData.append('file', file);
+  if (sheetName) formData.append('sheet_name', sheetName);
 
   const token = window._accessToken || sessionStorage.getItem('nettrack_token');
   const headers = {};
@@ -2469,11 +2474,38 @@ async function processImportFile(file) {
     }
     _importData = await res.json();
     _missingRows = {};
-    showImportStep2();
+
+    // If multiple sheets and no sheet chosen yet, show picker
+    if (_importData.sheet_names?.length > 1 && !sheetName) {
+      showSheetPicker(_importData.sheet_names, _importData.active_sheet);
+    } else {
+      document.getElementById('import-sheet-picker').style.display = 'none';
+      showImportStep2();
+    }
   } catch(e) {
     showToast('Error reading file: ' + e.message);
     info.textContent = '';
   }
+}
+
+function showSheetPicker(sheets, activeSheet) {
+  const picker = document.getElementById('import-sheet-picker');
+  const list   = document.getElementById('import-sheet-list');
+  const info   = document.getElementById('import-file-info');
+  info.textContent = `Found ${sheets.length} sheets — choose which one to import:`;
+  picker.style.display = '';
+
+  list.innerHTML = sheets.map(name => `
+    <button class="btn${name === activeSheet ? ' primary' : ''}"
+            onclick="selectSheet('${name.replace(/'/g, "\'")}')"
+            style="font-size:13px;">
+      ${name}
+    </button>`).join('');
+}
+
+function selectSheet(name) {
+  document.getElementById('import-sheet-picker').style.display = 'none';
+  processImportFile(_importFile, name);
 }
 
 function showImportStep2() {
