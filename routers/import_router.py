@@ -148,11 +148,10 @@ def _normalize_status(val: str) -> str:
 
 
 class ConfirmRequest(BaseModel):
-    mapping:  Dict[str, Optional[str]]   # excel_col → device_field
-    rows:     List[Dict[str, Any]]        # raw rows from preview
-    # Fields the user filled in for rows with missing required data
-    # {row_index: {field: value}}
-    overrides: Optional[Dict[str, Dict[str, Any]]] = None
+    mapping:      Dict[str, Optional[str]]
+    rows:         List[Dict[str, Any]]
+    overrides:    Optional[Dict[str, Dict[str, Any]]] = None
+    force_update: bool = False   # if True, known (unchanged) devices are also updated
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -376,6 +375,9 @@ async def confirm_import(
             if diff_data:
                 state = 'changed'
                 diff  = json.dumps(diff_data)
+            elif payload.force_update:
+                state = 'changed'   # treat as changed so it gets written
+                diff  = None
             else:
                 state = 'known'
 

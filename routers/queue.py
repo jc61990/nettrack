@@ -126,15 +126,22 @@ def _compute_diff(existing: models.Device, incoming: dict) -> dict:
 
 
 def _apply_to_inventory(item: models.DiscoveryQueue, db: Session,
-                         user_id: int) -> models.Device:
-    """Write a queue item into the devices table."""
+                         user_id: int, overwrite: bool = False) -> models.Device:
+    """Write a queue item into the devices table.
+    If overwrite=True, all non-None fields replace existing values.
+    If overwrite=False (default), only non-None fields are written.
+    """
     try:
         if item.existing_id:
             device = db.query(models.Device).filter(models.Device.id == item.existing_id).first()
             if device:
                 for f in DEVICE_FIELDS:
                     val = _clean(getattr(item, f))
-                    if val is not None:
+                    if overwrite:
+                        # Write all fields including None to clear old values
+                        setattr(device, f, val)
+                    elif val is not None:
+                        # Only overwrite if new value is set
                         setattr(device, f, val)
                 db.commit()
                 db.refresh(device)
@@ -321,7 +328,9 @@ def accept_item(
     if not item:
         raise HTTPException(status_code=404, detail="Queue item not found")
 
-    device = _apply_to_inventory(item, db, current_user.id)
+    # Use overwrite mode for changed items so all mapped fields get updated
+    overwrite = item.queue_state == 'changed'
+    device = _apply_to_inventory(item, db, current_user.id, overwrite=overwrite)
     item.queue_status = 'accepted'
     item.reviewed_at  = datetime.now(timezone.utc)
     item.reviewed_by  = current_user.id
@@ -387,7 +396,8 @@ def bulk_accept(
     count   = 0
     now     = datetime.now(timezone.utc)
     for item in items:
-        _apply_to_inventory(item, db, current_user.id)
+        overwrite = item.queue_state == 'changed'
+        _apply_to_inventory(item, db, current_user.id, overwrite=overwrite)
         item.queue_status = 'accepted'
         item.reviewed_at  = now
         item.reviewed_by  = current_user.id

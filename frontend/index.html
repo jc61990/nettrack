@@ -478,6 +478,10 @@
           </div>
           <div style="display:flex;gap:8px;">
             <button class="btn" onclick="resetImport()">← Back</button>
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">
+              <input type="checkbox" id="import-force-update" style="width:14px;height:14px;"/>
+              Update existing devices
+            </label>
             <button class="btn primary" onclick="runImport()">Import <span id="import-count-label"></span></button>
           </div>
         </div>
@@ -2640,9 +2644,10 @@ async function runImport() {
       headers,
       credentials: 'include',
       body: JSON.stringify({
-        mapping:   _importData.mapping,
-        rows:      _importData.all_rows,
-        overrides: _missingRows,
+        mapping:      _importData.mapping,
+        rows:         _importData.all_rows,
+        overrides:    _missingRows,
+        force_update: document.getElementById('import-force-update')?.checked || false,
       }),
     });
 
